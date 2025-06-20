@@ -99,7 +99,7 @@ for domain in domain_configs:
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
 
-        if diff < 0 or diff > 60:
+        if diff < 0 or diff > 3600:
             continue  # not within current 1-minute window
 
         name = row.get("Name", "").strip()
