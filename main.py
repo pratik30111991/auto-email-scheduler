@@ -57,7 +57,16 @@ for domain in domain_configs:
     imap_server = domain.get("IMAP Server", smtp_server)
     port = int(domain["Port"])
     sender_email = domain["Email ID"]
-    password = os.environ.get("SMTP_PASS")  # Assumes all accounts use same pass
+
+    # ✅ Use correct password for each domain
+    key_map = {
+        "Dilshad_Mails": "SMTP_DILSHAD",
+        "Nana_Mails": "SMTP_NANA",
+        "Gaurav_Mails": "SMTP_GAURAV",
+        "Info_Mails": "SMTP_INFO"
+    }
+    env_key = key_map.get(sub_sheet_name)
+    password = os.environ.get(env_key)
 
     try:
         subsheet = sheet.worksheet(sub_sheet_name)
