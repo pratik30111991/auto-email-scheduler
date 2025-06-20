@@ -1,4 +1,4 @@
-name: Auto Email Sender v2
+name: Auto Email Sender
 
 on:
   schedule:
