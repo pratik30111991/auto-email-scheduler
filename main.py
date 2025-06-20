@@ -6,51 +6,66 @@ from datetime import datetime
 import pytz
 import time
 import os
+import json
 
 # === CONSTANTS ===
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 
-# === SAVE JSON SECRET TO FILE ===
+# === WRITE JSON SECRET TO FILE ===
+if not os.environ.get("GOOGLE_JSON"):
+    print("❌ GOOGLE_JSON not found in environment")
+    exit(1)
+
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
+print("✅ credentials.json written")
 
 # === CONNECT TO SHEET ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SPREADSHEET_ID)
+try:
+    creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID)
+    print("✅ Google Sheet connected")
+except Exception as e:
+    print("❌ Error connecting to Google Sheet:", e)
+    exit(1)
 
 # === GET DOMAIN CONFIGS ===
-domain_sheet = sheet.worksheet("Domain Details")
-domain_configs = domain_sheet.get_all_records()
+try:
+    domain_sheet = sheet.worksheet("Domain Details")
+    domain_configs = domain_sheet.get_all_records()
+    print(f"📄 Found {len(domain_configs)} domain config(s)")
+except Exception as e:
+    print("❌ Failed to read 'Domain Details':", e)
+    exit(1)
 
-# === SEND EMAIL FUNCTION ===
+# === EMAIL SENDER FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient
-
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
-        print(f"✅ Sent to {recipient}")
+        print(f"✅ Email sent to {recipient}")
 
-        # Save to Sent folder
+        # Save to Sent
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
         imap.login(sender_email, password)
         imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
         imap.logout()
         return True
     except Exception as e:
-        print(f"❌ Failed to send to {recipient}: {e}")
+        print(f"❌ Failed to send email to {recipient}: {e}")
         return False
 
-# === TRY ALL SUBSHEETS ===
+# === PROCESS EACH SUBSHEET ===
 for domain in domain_configs:
     sub_sheet_name = domain["SubSheet Name"]
     smtp_server = domain["SMTP Server"]
@@ -58,7 +73,6 @@ for domain in domain_configs:
     port = int(domain["Port"])
     sender_email = domain["Email ID"]
 
-    # ✅ Use correct password for each domain
     key_map = {
         "Dilshad_Mails": "SMTP_DILSHAD",
         "Nana_Mails": "SMTP_NANA",
@@ -68,11 +82,15 @@ for domain in domain_configs:
     env_key = key_map.get(sub_sheet_name)
     password = os.environ.get(env_key)
 
+    if not password:
+        print(f"❌ No password found for {sub_sheet_name}")
+        continue
+
     try:
         subsheet = sheet.worksheet(sub_sheet_name)
         rows = subsheet.get_all_records()
     except Exception as e:
-        print(f"⚠️ Could not read sheet {sub_sheet_name}: {e}")
+        print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
     for i, row in enumerate(rows, start=2):
@@ -82,7 +100,6 @@ for domain in domain_configs:
         if "mail sent" in status:
             continue
 
-        # Parse date/time
         parsed = False
         for fmt in ["%d-%m-%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M"]:
             try:
@@ -99,8 +116,9 @@ for domain in domain_configs:
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
 
-        if diff < 0 or diff > 3600:
-            continue  # not within current 1-minute window
+        if diff < 0 or diff > 3600:  # Accept up to 1 hour past schedule
+            print(f"⏱ Skipped: Scheduled at {schedule_dt}, Now is {now}, diff = {diff} seconds")
+            continue
 
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
@@ -120,8 +138,9 @@ for domain in domain_configs:
             imap_server=imap_server
         )
 
+        timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
         if success:
             subsheet.update_cell(i, 8, "Mail Sent Successfully")
-            subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
+            subsheet.update_cell(i, 9, timestamp)
         else:
             subsheet.update_cell(i, 8, "Error sending mail")
