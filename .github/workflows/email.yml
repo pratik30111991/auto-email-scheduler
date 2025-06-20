@@ -23,8 +23,10 @@ jobs:
 
       - name: Run mail script
         env:
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          IMAP_PASS: ${{ secrets.IMAP_PASS }}
+          SMTP_DILSHAD: ${{ secrets.SMTP_DILSHAD }}
+          SMTP_NANA: ${{ secrets.SMTP_NANA }}
+          SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
+          SMTP_INFO: ${{ secrets.SMTP_INFO }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
         run: |
           echo "$GOOGLE_JSON" > credentials.json
