@@ -44,10 +44,11 @@ except Exception as e:
 
 # === EMAIL SENDER FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
-    msg = MIMEText(body)
+    msg = MIMEText(body, "html")  # ✅ Enable HTML
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient
+
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
@@ -64,6 +65,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     except Exception as e:
         print(f"❌ Failed to send email to {recipient}: {e}")
         return False
+
 
 # === PROCESS EACH SUBSHEET ===
 for domain in domain_configs:
