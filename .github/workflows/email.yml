@@ -1,0 +1,31 @@
+name: Auto Email Sender
+
+on:
+  schedule:
+    - cron: '*/1 * * * *'  # Run every 1 minute
+  workflow_dispatch:
+
+jobs:
+  send_mail:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run mail script
+        env:
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          IMAP_PASS: ${{ secrets.IMAP_PASS }}
+          GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
+        run: |
+          echo "$GOOGLE_JSON" > credentials.json
+          python main.py
