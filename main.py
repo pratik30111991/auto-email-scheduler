@@ -1,154 +1,146 @@
-import os
-import time
 import gspread
-import ssl
-import smtplib
-import imaplib
-import pytz
-
-from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
+import smtplib, ssl, imaplib
 from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
-from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+import pytz
+import time
+import os
+import json
 
-# === CONFIG ===
+# === CONSTANTS ===
+INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-JSON_FILE      = "credentials.json"
-INDIA_TZ       = pytz.timezone("Asia/Kolkata")
+JSON_FILE = "credentials.json"
 
-# === 1) WRITE GOOGLE_JSON SECRET TO FILE ===
-raw = os.environ.get("GOOGLE_JSON")
-if not raw:
-    print("❌ Missing GOOGLE_JSON in env")
+# === WRITE JSON SECRET TO FILE ===
+if not os.environ.get("GOOGLE_JSON"):
+    print("❌ GOOGLE_JSON not found in environment")
     exit(1)
+
 with open(JSON_FILE, "w") as f:
-    f.write(raw)
+    f.write(os.environ["GOOGLE_JSON"])
+print("✅ credentials.json written")
 
-# === 2) AUTHORIZE & OPEN SHEET ===
-scope  = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
-creds  = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
-client = gspread.authorize(creds)
-sheet  = client.open_by_key(SPREADSHEET_ID)
+# === CONNECT TO SHEET ===
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+try:
+    creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID)
+    print("✅ Google Sheet connected")
+except Exception as e:
+    print("❌ Error connecting to Google Sheet:", e)
+    exit(1)
 
-# === 3) LOAD DOMAIN DETAILS ===
-domain_cfg = sheet.worksheet("Domain Details").get_all_records()
+# === GET DOMAIN CONFIGS ===
+try:
+    domain_sheet = sheet.worksheet("Domain Details")
+    domain_configs = domain_sheet.get_all_records()
+    print(f"📄 Found {len(domain_configs)} domain config(s)")
+except Exception as e:
+    print("❌ Failed to read 'Domain Details':", e)
+    exit(1)
 
-# === 4) EMAIL SENDER ===
-def send_email(smtp_server, port, user, pwd, to_addr, subject, html_body, imap_server, image_files):
-    msg = MIMEMultipart("related")
-    msg["From"]    = user
-    msg["To"]      = to_addr
+# === EMAIL SENDER FUNCTION ===
+def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
+    msg = MIMEText(body)
     msg["Subject"] = subject
-
-    # build HTML part
-    alt = MIMEMultipart("alternative")
-    msg.attach(alt)
-    alt.attach(MIMEText(html_body, "html"))
-
-    # attach inline images
-    for path, cid in image_files:
-        try:
-            img = MIMEImage(open(path,"rb").read())
-            img.add_header("Content-ID", f"<{cid}>")
-            img.add_header("Content-Disposition", "inline", filename=os.path.basename(path))
-            msg.attach(img)
-        except Exception as e:
-            print(f"⚠️ Could not attach {path}: {e}")
-
-    # send SMTP
+    msg["From"] = sender_email
+    msg["To"] = recipient
     try:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, port, context=ctx) as s:
-            s.login(user, pwd)
-            s.sendmail(user, to_addr, msg.as_string())
-        # save to Sent
-        im = imaplib.IMAP4_SSL(imap_server or smtp_server)
-        im.login(user, pwd)
-        im.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
-        im.logout()
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, recipient, msg.as_string())
+        print(f"✅ Email sent to {recipient}")
+
+        # Save to Sent
+        imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
+        imap.login(sender_email, password)
+        imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
+        imap.logout()
         return True
     except Exception as e:
-        print(f"❌ send_email error for {to_addr}: {e}")
+        print(f"❌ Failed to send email to {recipient}: {e}")
         return False
 
-# === 5) LOOP SUBSHEETS & SEND ===
-for dom in domain_cfg:
-    sheet_name = dom["SubSheet Name"]
-    smtp_srv   = dom["SMTP Server"]
-    imap_srv   = dom.get("IMAP Server", smtp_srv)
-    port       = int(dom["Port"])
-    sender     = dom["Email ID"]
-    pwd_env    = {
-      "Dilshad_Mails":"SMTP_DILSHAD",
-      "Nana_Mails":"SMTP_NANA",
-      "Gaurav_Mails":"SMTP_GAURAV",
-      "Info_Mails":"SMTP_INFO"
-    }.get(sheet_name)
+# === PROCESS EACH SUBSHEET ===
+for domain in domain_configs:
+    sub_sheet_name = domain["SubSheet Name"]
+    smtp_server = domain["SMTP Server"]
+    imap_server = domain.get("IMAP Server", smtp_server)
+    port = int(domain["Port"])
+    sender_email = domain["Email ID"]
 
-    pwd = os.environ.get(pwd_env or "")
-    if not pwd:
-        print(f"❌ No password for {sheet_name}")
+    key_map = {
+        "Dilshad_Mails": "SMTP_DILSHAD",
+        "Nana_Mails": "SMTP_NANA",
+        "Gaurav_Mails": "SMTP_GAURAV",
+        "Info_Mails": "SMTP_INFO"
+    }
+    env_key = key_map.get(sub_sheet_name)
+    password = os.environ.get(env_key)
+
+    if not password:
+        print(f"❌ No password found for {sub_sheet_name}")
         continue
 
     try:
-        sub = sheet.worksheet(sheet_name)
-        rows = sub.get_all_records()
+        subsheet = sheet.worksheet(sub_sheet_name)
+        rows = subsheet.get_all_records()
     except Exception as e:
-        print(f"⚠️ Cannot open {sheet_name}: {e}")
+        print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
-    for idx, row in enumerate(rows, start=2):
-        status = row.get("Status","").lower()
-        sched  = row.get("Schedule Date & Time","").strip()
+    for i, row in enumerate(rows, start=2):
+        status = row.get("Status", "").strip().lower()
+        schedule = row.get("Schedule Date & Time", "").strip()
+
         if "mail sent" in status:
             continue
 
-        # parse schedule
-        dt = None
-        for fmt in ["%d-%m-%Y %H:%M:%S","%d/%m/%Y %H:%M:%S","%d-%m-%Y %H:%M","%d/%m/%Y %H:%M"]:
+        parsed = False
+        for fmt in ["%d-%m-%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M"]:
             try:
-                dt = INDIA_TZ.localize(datetime.strptime(sched,fmt))
+                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt))
+                parsed = True
                 break
             except:
-                pass
-        if not dt:
-            sub.update_cell(idx,8,"Skipped: Invalid Date")
+                continue
+
+        if not parsed:
+            subsheet.update_cell(i, 8, "Skipped: Invalid Date Format")
             continue
 
-        now  = datetime.now(INDIA_TZ)
-        diff = (now - dt).total_seconds()
-        if diff < 0 or diff > 3600:
-            continue  # only send if within the last hour
+        now = datetime.now(INDIA_TZ)
+        diff = (now - schedule_dt).total_seconds()
 
-        # build personalized HTML from sheet Message
-        name    = row.get("Name","").strip()
-        to_addr = row.get("Email ID","").strip()
-        subj    = row.get("Subject","").strip()
-        msg_txt = row.get("Message","").strip()
+        if diff < 0 or diff > 3600:  # Accept up to 1 hour past schedule
+            print(f"⏱ Skipped: Scheduled at {schedule_dt}, Now is {now}, diff = {diff} seconds")
+            continue
 
-        # prepend greeting & convert CR→<br>
-        first   = name.split()[0] if name else "Friend"
-        html    = f"<p>Hi {first},</p><p>{msg_txt.replace(chr(10),'<br>')}</p>"
+        name = row.get("Name", "").strip()
+        email = row.get("Email ID", "").strip()
+        subject = row.get("Subject", "").strip()
+        message = row.get("Message", "").strip()
+        first_name = name.split()[0] if name else "Friend"
+        full_message = f"Hi {first_name},\n\n{message}"
 
-        # append images after user's content
-        html += """
-            <br>
-            <img src="cid:murderimg" style="max-width:300px;"><br><br>
-            <img src="cid:bannerimg" style="max-width:400px;">
-        """
-
-        # send it
-        ok = send_email(
-            smtp_srv, port, sender, pwd, to_addr, subj,
-            html, imap_srv,
-            [("Murder on the Mind.png","murderimg"),
-             ("mail_banner.png","bannerimg")]
+        success = send_email(
+            smtp_server=smtp_server,
+            port=port,
+            sender_email=sender_email,
+            password=password,
+            recipient=email,
+            subject=subject,
+            body=full_message,
+            imap_server=imap_server
         )
 
-        ts = now.strftime("%d-%m-%Y %H:%M:%S")
-        if ok:
-            sub.update_cell(idx,8,"Mail Sent Successfully")
-            sub.update_cell(idx,9,ts)
+        timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
+        if success:
+            subsheet.update_cell(i, 8, "Mail Sent Successfully")
+            subsheet.update_cell(i, 9, timestamp)
         else:
-            sub.update_cell(idx,8,"Error sending mail")
+            subsheet.update_cell(i, 8, "Error sending mail")
