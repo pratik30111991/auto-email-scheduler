@@ -2,6 +2,5 @@ gspread
 oauth2client
 pytz
 imaplib2
-email
 python-dotenv
 schedule
