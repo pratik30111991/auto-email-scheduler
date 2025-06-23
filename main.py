@@ -118,9 +118,7 @@ for domain in domain_configs:
         print(f"\u23f1 Row {i}: Scheduled={schedule_dt}, Now={now}, Diff={diff:.1f}s")
 
         if diff < 0:
-            continue
-        elif diff > 300:
-            subsheet.update_cell(i, 8, "Skipped: Late >5min")
+            print(f"⏳ Not time yet for row {i}. Scheduled: {schedule_dt}, Now: {now}")
             continue
 
         name = row.get("Name", "").strip()
