@@ -120,8 +120,8 @@ for domain in domain_configs:
         # ✅ Only send if time reached and delay <= 300 seconds
         if diff < 0:
             continue
-        elif diff > 300:
-            subsheet.update_cell(i, 8, f"Skipped: Late >5min ({int(diff)}s)")
+        elif diff > 600:
+            subsheet.update_cell(i, 8, f"Skipped: Late >10min ({int(diff)}s)")
             continue
 
         # Send
