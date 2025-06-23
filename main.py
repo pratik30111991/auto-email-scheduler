@@ -112,8 +112,10 @@ for domain in domain_configs:
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
 
-        if diff < 0 or diff > 3600:
-            continue
+        if diff < -300 or diff > 3600:  # Allow 5 minutes before time and 1 hour after
+            print(f"⏱ Skipped: Scheduled at {schedule_dt}, Now is {now}, diff = {diff} seconds")
+        continue
+
 
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
