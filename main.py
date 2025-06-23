@@ -115,11 +115,12 @@ for domain in domain_configs:
 
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
-        print(f"\u23f1 Row {i}: Scheduled={schedule_dt}, Now={now}, Diff={diff:.1f}s")
 
-        if diff < 0:
-            print(f"⏳ Not time yet for row {i}. Scheduled: {schedule_dt}, Now: {now}")
-            continue
+    if diff < 0:
+        print(f"⏳ Not time yet for row {i}. Scheduled: {schedule_dt}, Now: {now}")
+    continue
+    # ✅ Send if now >= schedule_dt — no more 5-min skip
+
 
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
