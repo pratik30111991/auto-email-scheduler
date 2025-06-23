@@ -98,7 +98,8 @@ for domain in domain_configs:
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        if "mail sent" in status:
+        if status not in ["", "pending"]:
+            print(f"⏩ Skipping row {i} due to status: {status}")
             continue
 
         parsed = False
