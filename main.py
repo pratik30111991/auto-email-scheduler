@@ -44,7 +44,7 @@ except Exception as e:
 
 # === EMAIL SENDER FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
-    msg = MIMEText(body, "html")  # ✅ Enable HTML
+    msg = MIMEText(body, "html")  # ✅ HTML supported
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient
@@ -65,7 +65,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     except Exception as e:
         print(f"❌ Failed to send email to {recipient}: {e}")
         return False
-
 
 # === PROCESS EACH SUBSHEET ===
 for domain in domain_configs:
@@ -116,22 +115,23 @@ for domain in domain_configs:
             continue
 
         now = datetime.now(INDIA_TZ)
+        diff = (now - schedule_dt).total_seconds()
 
-        # Allow execution if scheduled time is within the past 5 minutes (300 sec)
-    if schedule_dt > now:
-        print(f"⏳ Not yet time: Scheduled for {schedule_dt}, now is {now}")
-    continue
-
-    if (now - schedule_dt).total_seconds() > 300:
-        print(f"⏱ Skipped (too late): Scheduled at {schedule_dt}, now is {now}")
-    continue
+        # ✅ STRICT: Only allow email if delay <= 5 minutes (300 seconds)
+        if diff < 0:
+            print(f"⏳ Not time yet for row {i}. Scheduled: {schedule_dt}, Now: {now}")
+            continue
+        elif diff > 300:
+            print(f"❌ Skipped (delay > 5 min): Row {i}, Scheduled: {schedule_dt}, Sent at: {now} (diff: {diff}s)")
+            subsheet.update_cell(i, 8, "Skipped: Late >5min")
+            continue
 
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
         subject = row.get("Subject", "").strip()
         message = row.get("Message", "").strip()
         first_name = name.split()[0] if name else "Friend"
-        full_message = f"Hi {first_name},<br><br>{message}"
+        full_message = f"Hi {first_name},<br><br>{message}"  # ✅ HTML line break
 
         success = send_email(
             smtp_server=smtp_server,
