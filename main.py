@@ -116,12 +116,14 @@ for domain in domain_configs:
             continue
 
         now = datetime.now(INDIA_TZ)
-        diff = (now - schedule_dt).total_seconds()
 
-        # 🔁 Allow up to 5 minutes (300 sec) before or after
-    # Accept ±5 minute tolerance
-    if abs(diff) > 300:
-        print(f"⏱ Skipped: Scheduled at {schedule_dt}, Now is {now}, diff = {diff} seconds")
+        # Allow execution if scheduled time is within the past 5 minutes (300 sec)
+    if schedule_dt > now:
+        print(f"⏳ Not yet time: Scheduled for {schedule_dt}, now is {now}")
+    continue
+
+    if (now - schedule_dt).total_seconds() > 300:
+        print(f"⏱ Skipped (too late): Scheduled at {schedule_dt}, now is {now}")
     continue
 
         name = row.get("Name", "").strip()
