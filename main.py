@@ -118,14 +118,11 @@ for domain in domain_configs:
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
 
-        # ✅ FIXED: Allow sending from 5 mins before to 2 hours after
-                if diff < 0:
-            print(f"⏱ Skipped: Scheduled in future ({schedule_dt})")
-            continue
-        elif diff > 300:  # Only accept up to 5 minutes delay
-            print(f"⏱ Skipped: Too late! Scheduled at {schedule_dt}, Now is {now}, diff = {diff} seconds")
-            subsheet.update_cell(i, 8, "Skipped: Missed schedule (>5 mins)")
-            continue
+        # 🔁 Allow up to 5 minutes (300 sec) before or after
+    # Accept ±5 minute tolerance
+    if abs(diff) > 300:
+        print(f"⏱ Skipped: Scheduled at {schedule_dt}, Now is {now}, diff = {diff} seconds")
+    continue
 
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
