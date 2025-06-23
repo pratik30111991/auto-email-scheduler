@@ -6,7 +6,6 @@ from datetime import datetime
 import pytz
 import time
 import os
-import json
 
 # === CONSTANTS ===
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
@@ -42,9 +41,9 @@ except Exception as e:
     print("❌ Failed to read 'Domain Details':", e)
     exit(1)
 
-# === EMAIL SENDER FUNCTION ===
+# === EMAIL FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
-    msg = MIMEText(body, "html")  # ✅ Enable HTML
+    msg = MIMEText(body, "html")
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient
@@ -98,8 +97,8 @@ for domain in domain_configs:
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
+        # ✅ Only allow blank or 'pending' statuses
         if status not in ["", "pending"]:
-            print(f"⏩ Skipping row {i} due to status: {status}")
             continue
 
         parsed = False
@@ -118,14 +117,14 @@ for domain in domain_configs:
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
 
+        # ✅ Only send if time reached and delay <= 300 seconds
         if diff < 0:
-            print(f"⏳ Not time yet for row {i}. Scheduled: {schedule_dt}, Now: {now}")
             continue
         elif diff > 300:
-            print(f"❌ Skipped (delay > 5 min): Row {i}, Scheduled: {schedule_dt}, Sent at: {now} (diff: {diff}s)")
-            subsheet.update_cell(i, 8, "Skipped: Late >5min")
+            subsheet.update_cell(i, 8, f"Skipped: Late >5min ({int(diff)}s)")
             continue
 
+        # Send
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
         subject = row.get("Subject", "").strip()
