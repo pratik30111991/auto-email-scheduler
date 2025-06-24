@@ -97,8 +97,12 @@ for domain in domain_configs:
 
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
-        if diff < 0 or diff > 300:
-            continue
+        if diff < 0:
+            print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
+        continue
+        if diff > 300:
+            print(f"❌ Row {i} skipped due to delay >5 minutes (delay: {diff}s)")
+        continue
 
         name = row.get("Name", "")
         email = row.get("Email ID", "")
