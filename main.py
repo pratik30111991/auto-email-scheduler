@@ -1,3 +1,5 @@
+# === ✅ FIXED AND FINAL VERSION ===
+
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -8,14 +10,17 @@ import time
 import os
 import json
 
+# === CONSTANTS ===
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 JSON_FILE = "credentials.json"
 
+# === WRITE JSON SECRET FILE ===
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
+# === CONNECT TO GOOGLE SHEET ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
@@ -23,6 +28,7 @@ sheet = client.open_by_key(SPREADSHEET_ID)
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
 
+# === EMAIL SENDER FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
     msg["Subject"] = subject
@@ -33,6 +39,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
+
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
         imap.login(sender_email, password)
         imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
@@ -41,20 +48,32 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     except:
         return False
 
+# === PROCESS EACH SUBSHEET ===
+key_map = {
+    "Dilshad_Mails": "SMTP_DILSHAD",
+    "Nana_Mails": "SMTP_NANA",
+    "Gaurav_Mails": "SMTP_GAURAV",
+    "Info_Mails": "SMTP_INFO"
+}
+
 for domain in domain_configs:
-    subsheet = sheet.worksheet(domain["SubSheet Name"])
+    sub_sheet_name = domain["SubSheet Name"]
     smtp_server = domain["SMTP Server"]
     imap_server = domain.get("IMAP Server", smtp_server)
     port = int(domain["Port"])
     sender_email = domain["Email ID"]
-    key_map = {
-        "Dilshad_Mails": "SMTP_DILSHAD",
-        "Nana_Mails": "SMTP_NANA",
-        "Gaurav_Mails": "SMTP_GAURAV",
-        "Info_Mails": "SMTP_INFO"
-    }
-    password = os.environ.get(key_map.get(domain["SubSheet Name"]))
-    rows = subsheet.get_all_records()
+    password = os.environ.get(key_map.get(sub_sheet_name))
+
+    if not password:
+        print(f"❌ No password found for {sub_sheet_name}")
+        continue
+
+    try:
+        subsheet = sheet.worksheet(sub_sheet_name)
+        rows = subsheet.get_all_records()
+    except Exception as e:
+        print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
+        continue
 
     for i, row in enumerate(rows, start=2):
         status = row.get("Status", "").strip().lower()
@@ -62,9 +81,18 @@ for domain in domain_configs:
 
         if status not in ["", "pending"]:
             continue
-        try:
-            schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, "%d/%m/%Y %H:%M:%S"))
-        except:
+
+        parsed = False
+        for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
+            try:
+                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt))
+                parsed = True
+                break
+            except:
+                continue
+
+        if not parsed:
+            print(f"⛔ Row {i} invalid date format: '{schedule}' — Skipping without updating status")
             continue
 
         now = datetime.now(INDIA_TZ)
@@ -72,13 +100,13 @@ for domain in domain_configs:
         if diff < 0 or diff > 300:
             continue
 
-        name = row["Name"]
-        email = row["Email ID"]
-        subject = row["Subject"]
-        message = row["Message"]
+        name = row.get("Name", "")
+        email = row.get("Email ID", "")
+        subject = row.get("Subject", "")
+        message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        tracking_pixel = f'<img src="{TRACKING_BASE}?sheet={domain["SubSheet Name"]}&row={i}" width="1" height="1">'
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1">'
         full_body = f"Hi <b>{first_name}</b>,<br>{message}<br>{tracking_pixel}"
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
