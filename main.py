@@ -99,10 +99,10 @@ for domain in domain_configs:
         diff = (now - schedule_dt).total_seconds()
         if diff < 0:
             print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
-        continue
+            continue
         if diff > 300:
             print(f"❌ Row {i} skipped due to delay >5 minutes (delay: {diff}s)")
-        continue
+            continue
 
         name = row.get("Name", "")
         email = row.get("Email ID", "")
