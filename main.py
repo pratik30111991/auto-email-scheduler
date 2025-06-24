@@ -45,7 +45,8 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
         imap.logout()
         return True
-    except:
+    except Exception as e:
+        print("❌ Email sending failed:", e)
         return False
 
 # === PROCESS EACH SUBSHEET ===
@@ -118,3 +119,5 @@ for domain in domain_configs:
         if success:
             subsheet.update_cell(i, 8, "Mail Sent Successfully")
             subsheet.update_cell(i, 9, timestamp)
+        else:
+            subsheet.update_cell(i, 8, "Failed to Send")
