@@ -44,7 +44,7 @@ except Exception as e:
 
 # === EMAIL SENDER FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
-    msg = MIMEText(body, "html")  # ✅ HTML support
+    msg = MIMEText(body, "html")
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient
@@ -99,8 +99,10 @@ for domain in domain_configs:
         schedule = row.get("Schedule Date & Time", "").strip()
 
         if status not in ["", "pending"]:
-            print(f"⏩ Skipping row {i} due to status: {status}")
             continue
+
+        if not schedule:
+            continue  # Don't update anything if Schedule is empty
 
         parsed = False
         for fmt in ["%d-%m-%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M"]:
@@ -112,15 +114,15 @@ for domain in domain_configs:
                 continue
 
         if not parsed:
-            subsheet.update_cell(i, 8, "Skipped: Invalid Date Format")
-            continue
+            continue  # No update — just skip silently
 
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
 
         if diff < 0:
-            print(f"⏳ Not time yet for row {i}. Scheduled: {schedule_dt}, Now: {now}")
-            continue
+            continue  # Not yet due
+        if diff > 300:
+            continue  # Skipped silently if more than 5 mins late
 
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
