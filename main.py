@@ -1,5 +1,3 @@
-# === ✅ FINAL VERSION: Invisible Open Tracking + Visible Logo ===
-
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -10,17 +8,14 @@ import time
 import os
 import json
 
-# === CONSTANTS ===
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
-TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")  # required
+TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-# === WRITE JSON SECRET FILE ===
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
-# === CONNECT TO GOOGLE SHEET ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
@@ -28,7 +23,6 @@ sheet = client.open_by_key(SPREADSHEET_ID)
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
 
-# === EMAIL SENDER FUNCTION ===
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
     msg["Subject"] = subject
@@ -49,7 +43,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         print("❌ Email sending failed:", e)
         return False
 
-# === PROCESS EACH SUBSHEET ===
 key_map = {
     "Dilshad_Mails": "SMTP_DILSHAD",
     "Nana_Mails": "SMTP_NANA",
@@ -111,9 +104,9 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # ✅ Tracking + Greeting + Logo
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;">'
-        logo_img = '<img src="https://drive.google.com/uc?export=view&id=1lQ92oebih37YpDeMS5eNdmcBxiROziol" style="max-height:80px;"><br><br>'
+        # ✅ 100% Hidden tracking image + company logo
+        tracking_pixel = f'<img src=\"{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}\" width=\"1\" height=\"1\" style=\"display:block; max-height:0px; overflow:hidden;\">'
+        logo_img = '<img src=\"https://drive.google.com/uc?export=view&id=1lQ92oebih37YpDeMS5eNdmcBxiROziol\" style=\"max-height:80px;\"><br><br>'
 
         full_body = f"""Hi <b>{first_name}</b>,{tracking_pixel}<br><br>{logo_img}{message}"""
 
