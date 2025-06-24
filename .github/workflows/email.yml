@@ -28,7 +28,7 @@ jobs:
           SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
           SMTP_INFO: ${{ secrets.SMTP_INFO }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
-          TRACKING_BACKEND_URL: https://your-tracker-host.com/track  # Replace with deployed backend
+          TRACKING_BACKEND_URL: https://email-tracker-3ce5.onrender.com  # Replace with deployed backend
         run: |
           echo "$GOOGLE_JSON" > credentials.json
           python main.py
