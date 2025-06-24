@@ -1,4 +1,4 @@
-# === ✅ FIXED AND FINAL VERSION ===
+# === ✅ FINAL VERSION: Dynamic Name Greeting, No Tracking Image ===
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -13,7 +13,6 @@ import json
 # === CONSTANTS ===
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 JSON_FILE = "credentials.json"
 
 # === WRITE JSON SECRET FILE ===
@@ -111,8 +110,8 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1">'
-        full_body = f"Hi <b>{first_name}</b>,<br>{message}<br>{tracking_pixel}"
+        # ✅ Actual email body
+        full_body = f"Hi <b>{first_name}</b>,<br><br>{message}"
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
