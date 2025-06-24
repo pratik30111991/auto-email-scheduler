@@ -127,7 +127,7 @@ for domain in domain_configs:
         subject = row.get("Subject", "").strip()
         message = row.get("Message", "").strip()
         first_name = name.split()[0] if name else "Friend"
-        full_message = f"Hi <b>{first_name}<b>,<br>{message}"
+        full_message = f"Hi <b>{first_name}</b>,<br>{message}"
 
         success = send_email(
             smtp_server=smtp_server,
