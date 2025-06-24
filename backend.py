@@ -2,11 +2,9 @@ from flask import Flask, request, send_file
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pytz
-from datetime import datetime
 import io
 
 app = Flask(__name__)
-
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
