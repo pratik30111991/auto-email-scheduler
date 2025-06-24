@@ -1,4 +1,4 @@
-# === ✅ FINAL VERSION: Dynamic Name Greeting, No Tracking Image ===
+# === ✅ FINAL VERSION: Invisible Open Tracking + Visible Logo ===
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -14,6 +14,7 @@ import json
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
+TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")  # required
 
 # === WRITE JSON SECRET FILE ===
 with open(JSON_FILE, "w") as f:
@@ -110,8 +111,11 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # ✅ Actual email body
-        full_body = f"Hi <b>{first_name}</b>,<br><br>{message}"
+        # ✅ Tracking + Greeting + Logo
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;">'
+        logo_img = '<img src="https://drive.google.com/uc?export=view&id=1lQ92oebih37YpDeMS5eNdmcBxiROziol" style="max-height:80px;"><br><br>'
+
+        full_body = f"""Hi <b>{first_name}</b>,{tracking_pixel}<br><br>{logo_img}{message}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
