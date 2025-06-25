@@ -1,104 +1,118 @@
-import os
-import time
-import smtplib
-import imaplib
-import email.utils
-from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import smtplib, ssl, imaplib
+from email.mime.text import MIMEText
+from datetime import datetime
+import pytz
+import time
+import os
+import json
 
-# Load environment variables
-TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL")
-IS_MANUAL = os.getenv("IS_MANUAL", "false").lower() == "true"
+INDIA_TZ = pytz.timezone("Asia/Kolkata")
+SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
+JSON_FILE = "credentials.json"
+TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-SMTP_CREDENTIALS = {
-    "Dilshad_Mails": os.getenv("SMTP_DILSHAD"),
-    "Nana_Mails": os.getenv("SMTP_NANA"),
-    "Gaurav_Mails": os.getenv("SMTP_GAURAV"),
-    "Info_Mails": os.getenv("SMTP_INFO"),
+with open(JSON_FILE, "w") as f:
+    f.write(os.environ["GOOGLE_JSON"])
+
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+client = gspread.authorize(creds)
+sheet = client.open_by_key(SPREADSHEET_ID)
+domain_sheet = sheet.worksheet("Domain Details")
+domain_configs = domain_sheet.get_all_records()
+
+def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
+    msg = MIMEText(body, "html")
+    msg["Subject"] = subject
+    msg["From"] = sender_email
+    msg["To"] = recipient
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, recipient, msg.as_string())
+
+        imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
+        imap.login(sender_email, password)
+        imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
+        imap.logout()
+        return True
+    except Exception as e:
+        print("❌ Email sending failed:", e)
+        return False
+
+key_map = {
+    "Dilshad_Mails": "SMTP_DILSHAD",
+    "Nana_Mails": "SMTP_NANA",
+    "Gaurav_Mails": "SMTP_GAURAV",
+    "Info_Mails": "SMTP_INFO"
 }
 
-# Setup Google Sheets API
-scope = [
-    'https://spreadsheets.google.com/feeds',
-    'https://www.googleapis.com/auth/drive'
-]
-creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_key("1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q")
+for domain in domain_configs:
+    sub_sheet_name = domain["SubSheet Name"]
+    smtp_server = domain["SMTP Server"]
+    imap_server = domain.get("IMAP Server", smtp_server)
+    port = int(domain["Port"])
+    sender_email = domain["Email ID"]
+    password = os.environ.get(key_map.get(sub_sheet_name))
 
-# Send email function
-def send_email(smtp_str, sender, receiver, subject, body):
-    smtp_host, smtp_port, smtp_user, smtp_pass = smtp_str.split("|")
-    msg = MIMEMultipart("alternative")
-    msg['From'] = sender
-    msg['To'] = receiver
-    msg['Date'] = email.utils.formatdate(localtime=True)
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'html'))
-
-    with smtplib.SMTP_SSL(smtp_host, int(smtp_port)) as server:
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(sender, receiver, msg.as_string())
-
-# Process each sub-sheet
-for sub_sheet_name in SMTP_CREDENTIALS:
-    smtp_cred = SMTP_CREDENTIALS[sub_sheet_name]
-    if not smtp_cred:
-        print(f"❌ SMTP credentials missing or invalid for {sub_sheet_name}")
+    if not password:
+        print(f"❌ No password found for {sub_sheet_name}")
         continue
 
     try:
-        ws = sheet.worksheet(sub_sheet_name)
+        subsheet = sheet.worksheet(sub_sheet_name)
+        rows = subsheet.get_all_records()
     except Exception as e:
-        print(f"❌ Error accessing sheet {sub_sheet_name}: {e}")
+        print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
-    records = ws.get_all_records()
-    now = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    for i, row in enumerate(rows, start=2):
+        status = row.get("Status", "").strip().lower()
+        schedule = row.get("Schedule Date & Time", "").strip()
 
-    for i, row in enumerate(records, start=2):
-        schedule_str = row.get('Schedule Date & Time', '').strip()
-        status = row.get('Status', '').strip()
-        opened = row.get('Open?', '').strip()
-
-        if status.startswith("Mail Sent"):
+        if status not in ["", "pending"]:
             continue
 
-        try:
-            scheduled_time = datetime.strptime(schedule_str, '%d/%m/%Y %H:%M:%S')
-        except:
-            print(f"⛔ Row {i} invalid datetime: '{schedule_str}' — skipping")
+        parsed = False
+        for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
+            try:
+                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt))
+                parsed = True
+                break
+            except:
+                continue
+
+        if not parsed:
+            print(f"⛔ Row {i} invalid date format: '{schedule}' — Skipping without updating status")
             continue
 
-        if scheduled_time.strftime('%d/%m/%Y %H:%M:%S') > now and not IS_MANUAL:
+        now = datetime.now(INDIA_TZ)
+        diff = (now - schedule_dt).total_seconds()
+        if diff < 0:
+            print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
+            continue
+        if diff > 300:
+            print(f"❌ Row {i} skipped due to delay >5 minutes (delay: {diff}s)")
             continue
 
-        name = row.get("Name", "").strip()
-        email_to = row.get("Email ID", "").strip()
-        subject = row.get("Subject", "No Subject").strip()
-        message = row.get("Message", "").strip()
-        first_name = name.split()[0]
+        name = row.get("Name", "")
+        email = row.get("Email ID", "")
+        subject = row.get("Subject", "")
+        message = row.get("Message", "")
+        first_name = name.split()[0] if name else "Friend"
 
-        tracking_pixel = (
-            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
-            'alt="" width="1" height="1" style="opacity:0;position:absolute;left:-9999px;">'
-        )
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block; max-height:0px; overflow:hidden;">'
+        logo_img = '<img src="https://drive.google.com/uc?export=view&id=1lQ92oebih37YpDeMS5eNdmcBxiROziol" style="max-height:80px;"><br><br>'
 
-        if "</body>" in message.lower():
-            full_body = message.replace("</body>", tracking_pixel + "</body>")
+        full_body = f"""Hi <b>{first_name}</b>,{tracking_pixel}<br><br>{logo_img}{message}"""
+
+        success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
+        timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
+        if success:
+            subsheet.update_cell(i, 8, "Mail Sent Successfully")
+            subsheet.update_cell(i, 9, timestamp)
         else:
-            full_body = message + tracking_pixel
-
-        full_body = f"Hi <b>{first_name}</b>,<br><br>{full_body}"
-
-        try:
-            send_email(smtp_cred, smtp_cred.split('|')[2], email_to, subject, full_body)
-            ws.update_acell(f'G{i}', 'Mail Sent Successfully')
-            ws.update_acell(f'H{i}', datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-            print(f"✅ Mail sent to {email_to} in sheet {sub_sheet_name}")
-        except Exception as e:
-            ws.update_acell(f'G{i}', f"Error: {str(e)}")
-            print(f"❌ Failed to send mail to {email_to}: {e}")
+            subsheet.update_cell(i, 8, "Failed to Send")
