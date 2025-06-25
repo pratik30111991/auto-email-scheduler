@@ -6,38 +6,27 @@ from datetime import datetime
 import pytz
 import time
 import os
-import json
 
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-# ✅ Write credentials to file
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
-# ✅ Authorize Google Sheets
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/spreadsheets"
-]
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID)
-
-# ✅ Load domain SMTP details
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
-
-# ✅ Function to send email and save to Sent
 
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
     msg["Subject"] = subject.strip()
-    msg["From"] = sender_email.strip().replace("\n", "")
-    msg["To"] = recipient.strip().replace("\n", "")
+    msg["From"] = sender_email.strip()
+    msg["To"] = recipient.strip()
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
@@ -53,7 +42,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         print(f"❌ Email sending failed to {recipient}: {e}")
         return False
 
-# ✅ SMTP Secrets key mapping
 key_map = {
     "Dilshad_Mails": "SMTP_DILSHAD",
     "Nana_Mails": "SMTP_NANA",
@@ -61,7 +49,6 @@ key_map = {
     "Info_Mails": "SMTP_INFO"
 }
 
-# ✅ Loop through each subsheet
 for domain in domain_configs:
     sub_sheet_name = domain["SubSheet Name"]
     smtp_server = domain["SMTP Server"]
@@ -111,15 +98,16 @@ for domain in domain_configs:
             continue
 
         name = row.get("Name", "")
-        email = row.get("Email ID", "").strip().replace("\n", "")
+        email = row.get("Email ID", "").strip()
         subject = row.get("Subject", "")
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # ✅ Tracking pixel goes to bottom (invisible)
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none">'
+        # ✅ Build tracking pixel
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;">'
 
-        full_body = f"Hi <b>{first_name}</b>,<br><br>{message}<br><br>{tracking_pixel}"
+        # ✅ Final HTML body (no image after greeting, hidden pixel inside body)
+        full_body = f"""Hi <b>{first_name}</b>,<br><br>{message}<br><br>{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
