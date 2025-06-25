@@ -13,9 +13,8 @@ INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
-IS_MANUAL = os.getenv("IS_MANUAL", "false").lower() == "true"
 
-# ✅ Write credentials
+# ✅ Write credentials file
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -25,7 +24,7 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID)
 
-# ✅ Load SMTP credentials from Domain Details sheet
+# ✅ Load domain SMTP config
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
 
@@ -47,18 +46,16 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
 
-        # Save to Sent folder using IMAP
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
         imap.login(sender_email, password)
         imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
         imap.logout()
-
         return True
     except Exception as e:
         print(f"❌ Email to {recipient} failed: {e}")
         return False
 
-# ✅ Process each configured sheet
+# ✅ Loop over all configured sub-sheets
 for domain in domain_configs:
     sub_sheet_name = domain["SubSheet Name"]
     smtp_server = domain["SMTP Server"]
@@ -82,7 +79,7 @@ for domain in domain_configs:
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        if status not in ["", "pending"] and not IS_MANUAL:
+        if status not in ["", "pending"]:
             continue
 
         parsed = False
@@ -100,14 +97,12 @@ for domain in domain_configs:
 
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
-
-        if not IS_MANUAL:
-            if diff < 0:
-                print(f"⏳ Too early for row {i} — Scheduled at {schedule_dt}, now is {now}")
-                continue
-            if diff > 300:
-                print(f"❌ Row {i} skipped due to delay >5 min ({diff}s)")
-                continue
+        if diff < 0:
+            print(f"⏳ Too early for row {i} — Scheduled at {schedule_dt}, now is {now}")
+            continue
+        if diff > 300:
+            print(f"❌ Row {i} skipped due to delay >5 min ({diff}s)")
+            continue
 
         name = row.get("Name", "")
         email = row.get("Email ID", "").strip()
@@ -115,13 +110,9 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # ✅ Add hidden tracking pixel — Gmail compatible
+        # ✅ Inject safe tracking pixel (Gmail safe)
         tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block;">'
-            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
-            'alt="" width="1" height="1" style="opacity:0;position:absolute;left:-9999px;">'
-        
 
-        # Inject pixel before </body> or at end
         if "</body>" in message.lower():
             full_body = message.replace("</body>", tracking_pixel + "</body>")
         else:
@@ -129,7 +120,6 @@ for domain in domain_configs:
 
         full_body = f"Hi <b>{first_name}</b>,<br><br>{full_body}"
 
-        # ✅ Send and update status
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
 
