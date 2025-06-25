@@ -25,7 +25,7 @@ def track():
     row = request.args.get("row")
     print(f"📩 /track called → sheet={sheet_name}, row={row}")
 
-    try:
+        try:
         creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
@@ -34,10 +34,11 @@ def track():
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SPREADSHEET_ID)
         ws = sheet.worksheet(sheet_name)
-        ws.update_cell(int(row), 10, "Yes")
+        ws.update_cell(int(row), 10, "Yes")  # Column 10 = J = 'Open?'
         print(f"✅ SUCCESS: Row {row} updated to 'Yes' in '{sheet_name}'")
     except Exception as e:
-        print("❌ ERROR in /track:", e)
+        print(f"❌ ERROR in /track for row={row}, sheet={sheet_name} — {e}")
+
 
     pixel = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04' +
                        b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
