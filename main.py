@@ -111,7 +111,10 @@ for domain in domain_configs:
         first_name = name.split()[0] if name else "Friend"
 
         # ✅ Inject safe tracking pixel (Gmail safe)
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block;">'
+        tracking_pixel = (
+            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
+            'width="1" height="1" style="display:none;" alt="">'
+            )
 
         if "</body>" in message.lower():
             full_body = message.replace("</body>", tracking_pixel + "</body>")
