@@ -9,10 +9,15 @@ app = Flask(__name__)
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 
-# Write GOOGLE_JSON from Env to file at startup
+# ✅ Always write credentials on startup
 with open(JSON_FILE, "w") as f:
     f.write(os.environ.get("GOOGLE_JSON", ""))
 print("💾 credentials.json file overwritten from env")
+
+# ✅ Add home route for Render check
+@app.route("/")
+def home():
+    return "✅ Email Tracker is running"
 
 @app.route("/track")
 def track():
@@ -37,7 +42,6 @@ def track():
     pixel = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04' +
                        b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
     return send_file(pixel, mimetype='image/gif')
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
