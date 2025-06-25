@@ -1,50 +1,44 @@
-# ================= backend.py =================
-from flask import Flask, request, send_file, make_response
+from flask import Flask, request, send_file
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import io, os
+import pytz
+import io
+import os
 
 app = Flask(__name__)
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 
-# write credentials on startup
-with open(JSON_FILE, "w") as f:
-    f.write(os.environ.get("GOOGLE_JSON", ""))
-
-@app.route("/")
-def home():
-    return "✅ Email Tracker is live"
+# Write GOOGLE_JSON from Env to file at startup
+if not os.path.exists(JSON_FILE):
+    with open(JSON_FILE, "w") as f:
+        f.write(os.environ.get("GOOGLE_JSON", ""))
+    print("💾 credentials.json file created")
 
 @app.route("/track")
 def track():
     sheet_name = request.args.get("sheet")
     row = request.args.get("row")
-    print(f"📩 Tracking → sheet={sheet_name}, row={row}")
+    print(f"📩 /track called → sheet={sheet_name}, row={row}")
 
     try:
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            JSON_FILE,
-            ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive",
-             "https://www.googleapis.com/auth/spreadsheets"]
-        )
+        creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets"
+        ])
         client = gspread.authorize(creds)
-        ws = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
-        ws.update_cell(int(row), 10, "Yes")          # column J
-        print(f"✅ Updated '{sheet_name}' row {row}")
+        sheet = client.open_by_key(SPREADSHEET_ID)
+        ws = sheet.worksheet(sheet_name)
+        ws.update_cell(int(row), 10, "Yes")  # Column J = 10
+        print(f"✅ SUCCESS: Row {row} updated to 'Yes' in '{sheet_name}'")
     except Exception as e:
-        print(f"❌ Sheet update failed – {e}")
+        print("❌ ERROR in /track:", e)
 
-    # 1×1 transparent GIF + no-cache headers
-    pixel = io.BytesIO(
-        b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!'
-        b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01'
-        b'\x00\x00\x02\x02D\x01\x00;'
-    )
-    resp = make_response(send_file(pixel, mimetype="image/gif"))
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return resp
+    pixel = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04' +
+                       b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
+    return send_file(pixel, mimetype='image/gif')
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
