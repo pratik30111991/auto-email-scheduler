@@ -9,12 +9,11 @@ app = Flask(__name__)
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 
-# ✅ Always write credentials from env
+# ✅ Always write credentials on startup
 with open(JSON_FILE, "w") as f:
     f.write(os.environ.get("GOOGLE_JSON", ""))
-print("💾 credentials.json written")
+print("💾 credentials.json file overwritten from env")
 
-# ✅ Home check route
 @app.route("/")
 def home():
     return "✅ Email Tracker is running"
@@ -34,14 +33,15 @@ def track():
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SPREADSHEET_ID)
         ws = sheet.worksheet(sheet_name)
-        ws.update_cell(int(row), 10, "Yes")  # Column J = Open?
-        print(f"✅ SUCCESS: Row {row} in '{sheet_name}' updated to 'Yes'")
+        ws.update_cell(int(row), 10, "Yes")  # Column J = 10
+        print(f"✅ SUCCESS: Row {row} updated to 'Yes' in '{sheet_name}'")
     except Exception as e:
-        print(f"❌ ERROR in /track: {e}")
+        print(f"❌ ERROR in /track for row={row}, sheet={sheet_name} — {e}")
 
-    # Transparent 1x1 gif pixel
-    pixel = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04' +
-                       b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
+    pixel = io.BytesIO(
+        b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!'
+        b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+    )
     return send_file(pixel, mimetype='image/gif')
 
 if __name__ == "__main__":
