@@ -104,7 +104,7 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;">'
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;" alt="">'
         logo_img = '<img src="https://drive.google.com/uc?export=view&id=1lQ92oebih37YpDeMS5eNdmcBxiROziol" style="max-height:80px;"><br><br>'
 
         full_body = f"""Hi <b>{first_name}</b>,<br><br>{logo_img}{message}{tracking_pixel}"""
