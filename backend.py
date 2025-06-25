@@ -19,33 +19,26 @@ if not os.path.exists(JSON_FILE):
 def track():
     sheet_name = request.args.get("sheet")
     row = request.args.get("row")
-    print(f"📥 Track ping received: sheet={sheet_name}, row={row}")
+    print(f"📩 /track called → sheet={sheet_name}, row={row}")
+
     try:
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            JSON_FILE,
-            ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        )
+        creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets"
+        ])
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SPREADSHEET_ID)
         ws = sheet.worksheet(sheet_name)
-        print(f"🗂 Found worksheet: {sheet_name}")
-        max_row = len(ws.get_all_values())
-        print(f"📊 Worksheet has {max_row} rows total")
-        target = int(row)
-        if target < 2 or target > max_row:
-            print(f"⚠️ Row {target} is out of bounds (2–{max_row})")
-        else:
-            ws.update_cell(target, 10, "Yes")
-            print(f"✅ 'Open?' set to Yes at row {target}")
+        ws.update_cell(int(row), 10, "Yes")  # Column J = 10
+        print(f"✅ SUCCESS: Row {row} updated to 'Yes' in '{sheet_name}'")
     except Exception as e:
-        print("❌ Track error:", e)
+        print("❌ ERROR in /track:", e)
 
-    pixel = io.BytesIO(
-        b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!'
-        b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02'
-        b'\x02D\x01\x00;'
-    )
+    pixel = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04' +
+                       b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
     return send_file(pixel, mimetype='image/gif')
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
