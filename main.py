@@ -116,10 +116,10 @@ for domain in domain_configs:
         first_name = name.split()[0] if name else "Friend"
 
         # ✅ Add hidden tracking pixel — Gmail compatible
-        tracking_pixel = (
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block;">'
             f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
             'alt="" width="1" height="1" style="opacity:0;position:absolute;left:-9999px;">'
-        )
+        
 
         # Inject pixel before </body> or at end
         if "</body>" in message.lower():
