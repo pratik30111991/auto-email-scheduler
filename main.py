@@ -40,7 +40,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         imap.logout()
         return True
     except Exception as e:
-        print("❌ Email sending failed:", e)
+        print(f"❌ Email sending failed to {recipient}: {e}")
         return False
 
 key_map = {
