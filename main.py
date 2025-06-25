@@ -12,7 +12,6 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-# Write Google credentials from environment
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -33,8 +32,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
-
-        # Save in "Sent"
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
         imap.login(sender_email, password)
         imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
@@ -44,7 +41,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         print(f"❌ Email sending failed to {recipient}: {e}")
         return False
 
-# Map for each subsheet
 key_map = {
     "Dilshad_Mails": "SMTP_DILSHAD",
     "Nana_Mails": "SMTP_NANA",
@@ -106,14 +102,11 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # ✅ Invisible pixel (totally hidden)
-        tracking_pixel = f'''
-        <div style="display:none;width:0;height:0;overflow:hidden;">
-            <img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block;">
-        </div>
-        '''
+        # Hidden tracking pixel
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;">'
 
-        full_body = f"""Hi <b>{first_name}</b>,<br><br>{message}{tracking_pixel}"""
+        # Final HTML email (no image after greeting, hidden pixel only)
+        full_body = f"""Hi <b>{first_name}</b>,<br><br>{message}<br>{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
