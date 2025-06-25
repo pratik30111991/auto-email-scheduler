@@ -1,3 +1,5 @@
+# ================= main.py =================
+
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -12,15 +14,26 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
+# ✅ Write credentials file
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
+# ✅ Auth to Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID)
+
+# ✅ Load domain SMTP config
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
+
+key_map = {
+    "Dilshad_Mails": "SMTP_DILSHAD",
+    "Nana_Mails": "SMTP_NANA",
+    "Gaurav_Mails": "SMTP_GAURAV",
+    "Info_Mails": "SMTP_INFO"
+}
 
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
@@ -39,16 +52,10 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         imap.logout()
         return True
     except Exception as e:
-        print(f"❌ Email sending failed to {recipient}: {e}")
+        print(f"❌ Email to {recipient} failed: {e}")
         return False
 
-key_map = {
-    "Dilshad_Mails": "SMTP_DILSHAD",
-    "Nana_Mails": "SMTP_NANA",
-    "Gaurav_Mails": "SMTP_GAURAV",
-    "Info_Mails": "SMTP_INFO"
-}
-
+# ✅ Loop over all configured sub-sheets
 for domain in domain_configs:
     sub_sheet_name = domain["SubSheet Name"]
     smtp_server = domain["SMTP Server"]
@@ -58,14 +65,14 @@ for domain in domain_configs:
     password = os.environ.get(key_map.get(sub_sheet_name))
 
     if not password:
-        print(f"❌ No password found for {sub_sheet_name}")
+        print(f"❌ Missing password for {sub_sheet_name}")
         continue
 
     try:
         subsheet = sheet.worksheet(sub_sheet_name)
         rows = subsheet.get_all_records()
     except Exception as e:
-        print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
+        print(f"⚠️ Cannot open sheet '{sub_sheet_name}': {e}")
         continue
 
     for i, row in enumerate(rows, start=2):
@@ -85,16 +92,16 @@ for domain in domain_configs:
                 continue
 
         if not parsed:
-            print(f"⛔ Row {i} invalid date format: '{schedule}' — Skipping without updating status")
+            print(f"⛔ Row {i} invalid datetime: '{schedule}' — skipping")
             continue
 
         now = datetime.now(INDIA_TZ)
         diff = (now - schedule_dt).total_seconds()
         if diff < 0:
-            print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
+            print(f"⏳ Too early for row {i} — Scheduled at {schedule_dt}, now is {now}")
             continue
         if diff > 300:
-            print(f"❌ Row {i} skipped due to delay >5 minutes (delay: {diff}s)")
+            print(f"❌ Row {i} skipped due to delay >5 min ({diff}s)")
             continue
 
         name = row.get("Name", "")
@@ -103,14 +110,13 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # ✅ Build tracking pixel
+        # Tracking pixel injected at bottom of message only
         tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;">'
-
-        # ✅ Final HTML body (no image after greeting, hidden pixel inside body)
-        full_body = f"""Hi <b>{first_name}</b>,<br><br>{message}<br><br>{tracking_pixel}"""
+        full_body = f"Hi <b>{first_name}</b>,<br><br>{message}{tracking_pixel}"
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
+
         if success:
             subsheet.update_cell(i, 8, "Mail Sent Successfully")
             subsheet.update_cell(i, 9, timestamp)
