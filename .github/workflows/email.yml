@@ -1,3 +1,4 @@
+# .github/workflows/email.yml
 name: Auto Email Sender
 
 on:
@@ -18,8 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run email script
         env:
@@ -29,6 +29,7 @@ jobs:
           SMTP_INFO: ${{ secrets.SMTP_INFO }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
           TRACKING_BACKEND_URL: https://email-tracker-3ce5.onrender.com
+          IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           echo "$GOOGLE_JSON" > credentials.json
           python main.py
