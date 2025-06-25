@@ -25,9 +25,9 @@ domain_configs = domain_sheet.get_all_records()
 
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
-    msg["Subject"] = subject
-    msg["From"] = sender_email
-    msg["To"] = recipient
+    msg["Subject"] = subject.strip()
+    msg["From"] = sender_email.strip().replace("\n", "")
+    msg["To"] = recipient.strip().replace("\n", "")
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
@@ -99,7 +99,7 @@ for domain in domain_configs:
             continue
 
         name = row.get("Name", "")
-        email = row.get("Email ID", "")
+        email = row.get("Email ID", "").strip().replace("\n", "")
         subject = row.get("Subject", "")
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
