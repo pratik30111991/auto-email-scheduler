@@ -10,10 +10,9 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 
 # Write GOOGLE_JSON from Env to file at startup
-if not os.path.exists(JSON_FILE):
-    with open(JSON_FILE, "w") as f:
-        f.write(os.environ.get("GOOGLE_JSON", ""))
-    print("💾 credentials.json file created")
+with open(JSON_FILE, "w") as f:
+    f.write(os.environ.get("GOOGLE_JSON", ""))
+print("💾 credentials.json file overwritten from env")
 
 @app.route("/track")
 def track():
@@ -30,7 +29,7 @@ def track():
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SPREADSHEET_ID)
         ws = sheet.worksheet(sheet_name)
-        ws.update_cell(int(row), 10, "Yes")  # Column J = 10
+        ws.update_cell(int(row), 10, "Yes")
         print(f"✅ SUCCESS: Row {row} updated to 'Yes' in '{sheet_name}'")
     except Exception as e:
         print("❌ ERROR in /track:", e)
