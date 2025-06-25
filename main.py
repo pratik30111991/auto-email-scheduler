@@ -1,130 +1,118 @@
 import os
-import base64
 import smtplib
 import imaplib
-import email.utils
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from datetime import datetime
+import email.message
 import pytz
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from time import sleep
+from dotenv import load_dotenv
 
-# === Setup ===
-IST = pytz.timezone('Asia/Kolkata')
-TRACKING_BASE = os.environ.get("TRACKING_BACKEND_URL")
-IS_MANUAL = os.environ.get("IS_MANUAL", "false").lower() == "true"
+load_dotenv()
 
-smtp_details = {
-    'Dilshad_Mails': os.environ.get("SMTP_DILSHAD"),
-    'Nana_Mails': os.environ.get("SMTP_NANA"),
-    'Gaurav_Mails': os.environ.get("SMTP_GAURAV"),
-    'Info_Mails': os.environ.get("SMTP_INFO"),
+TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL")
+IS_MANUAL = os.getenv("IS_MANUAL", "false").lower() == "true"
+
+# Google Sheet auth
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
+sheet = client.open_by_key("1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q")
+
+# Subsheet mapping
+SHEET_SMTP_MAPPING = {
+    "Dilshad_Mails": "SMTP_DILSHAD",
+    "Nana_Mails": "SMTP_NANA",
+    "Gaurav_Mails": "SMTP_GAURAV",
+    "Info_Mails": "SMTP_INFO",
 }
 
-# === Google Sheet Setup ===
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials_json = os.getenv("GOOGLE_JSON")
+# IST timezone
+IST = pytz.timezone("Asia/Kolkata")
+now_ist = datetime.now(IST)
 
-if not credentials_json:
-    raise ValueError("GOOGLE_JSON is not set.")
+# Function to send email and return success
 
-creds_dict = eval(credentials_json) if isinstance(credentials_json, str) else credentials_json
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(credentials)
+def send_email(smtp_user, smtp_pass, to_email, subject, html):
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_user
+    msg["To"] = to_email
 
-spreadsheet_id = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-spreadsheet = client.open_by_key(spreadsheet_id)
-sub_sheets = spreadsheet.worksheets()
+    html_part = MIMEText(html, "html")
+    msg.attach(html_part)
 
-now = datetime.now(IST)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_user, to_email, msg.as_string())
 
-for sheet in sub_sheets:
-    sub_sheet_name = sheet.title
-    if sub_sheet_name not in smtp_details or smtp_details[sub_sheet_name] is None:
-        continue
-
-    smtp_auth = smtp_details[sub_sheet_name]
-    if ':' not in smtp_auth:
+# Loop through all subsheets
+for sub_sheet_name in SHEET_SMTP_MAPPING:
+    smtp_credentials = os.getenv(SHEET_SMTP_MAPPING[sub_sheet_name])
+    if not smtp_credentials or ":" not in smtp_credentials:
         print(f"❌ SMTP credentials missing or invalid for {sub_sheet_name}")
         continue
 
-    smtp_email, smtp_password = smtp_auth.split(":", 1)
-    data = sheet.get_all_values()
-    headers = data[0]
-    rows = data[1:]
+    smtp_user, smtp_pass = smtp_credentials.split(":", 1)
 
-    # Get column indexes
-    col_idx = {h: i for i, h in enumerate(headers)}
-    required = ['Email ID', 'Subject', 'Message', 'Schedule Date & Time', 'Status']
-    if not all(k in col_idx for k in required):
-        print(f"⛔ Missing required columns in {sub_sheet_name}")
+    try:
+        worksheet = sheet.worksheet(sub_sheet_name)
+    except:
+        print(f"❌ Sheet {sub_sheet_name} not found")
         continue
 
-    for i, row in enumerate(rows, start=2):  # row index in sheet = i
+    data = worksheet.get_all_records()
+    for i, row in enumerate(data, start=2):
+        schedule_str = row.get("Schedule Date & Time")
+        status = row.get("Status")
+
+        if not schedule_str or status:
+            continue
+
         try:
-            status = row[col_idx['Status']].strip().lower()
-            if status.startswith("mail sent") or status.startswith("skipped"):
-                continue
+            schedule_dt = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
+            schedule_dt = IST.localize(schedule_dt)
+        except:
+            print(f"⛔ Row {i} invalid datetime: '{schedule_str}' — skipping")
+            continue
 
-            date_str = row[col_idx['Schedule Date & Time']].strip()
-            if not date_str:
-                print(f"⛔ Row {i} invalid datetime: '' — skipping")
-                continue
+        if schedule_dt > now_ist:
+            continue
 
-            try:
-                scheduled_dt = datetime.strptime(date_str, "%d/%m/%Y %H:%M:%S")
-                scheduled_dt = IST.localize(scheduled_dt)
-            except:
-                print(f"⛔ Row {i} invalid datetime format: {date_str}")
-                continue
+        name = row.get("Name")
+        email_id = row.get("Email ID")
+        subject = row.get("Subject")
+        message = row.get("Message")
 
-            if scheduled_dt > now and not IS_MANUAL:
-                continue
+        if not email_id or not subject or not message:
+            worksheet.update_acell(f"H{i}", "Skipped: Missing required fields")
+            continue
 
-            to_email = row[col_idx['Email ID']].strip()
-            subject = row[col_idx['Subject']].strip()
-            message = row[col_idx['Message']].strip()
-            name = row[col_idx.get('Name', -1)].strip() if 'Name' in col_idx else ""
-            first_name = name.split()[0] if name else ""
+        # Inject pixel
+        tracking_pixel = (
+            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
+            'alt="" width="1" height="1" style="opacity:0;position:absolute;left:-9999px;">
+        )
 
-            # === Compose email ===
-            tracking_pixel = (
-                f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
-                'width="1" height="1" style="display:none;" alt="tracker">'
-            )
+        full_body = message
+        if "</body>" in message.lower():
+            full_body = message.replace("</body>", tracking_pixel + "</body>")
+        else:
+            full_body = message + tracking_pixel
 
-            lower_msg = message.lower()
-            if "</body>" in lower_msg:
-                insert_index = lower_msg.rindex("</body>")
-                full_body = message[:insert_index] + tracking_pixel + message[insert_index:]
-            else:
-                full_body = message + tracking_pixel
+        first_name = name.split()[0] if name else "there"
+        full_body = f"Hi <b>{first_name}</b>,<br><br>{full_body}"
 
-            if first_name:
-                full_body = f"Hi <b>{first_name}</b>,<br><br>{full_body}"
-
-            msg = MIMEMultipart("alternative")
-            msg['Subject'] = subject
-            msg['From'] = smtp_email
-            msg['To'] = to_email
-            msg['Date'] = email.utils.formatdate(localtime=True)
-
-            mime_text = MIMEText(full_body, 'html')
-            msg.attach(mime_text)
-
-            # === Send email ===
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
-                server.starttls()
-                server.login(smtp_email, smtp_password)
-                server.sendmail(smtp_email, to_email, msg.as_string())
-
-            # === Update status ===
-            timestamp = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
-            sheet.update_cell(i, col_idx['Status'] + 1, "Mail Sent Successfully")
-            sheet.update_cell(i, col_idx['Timestamp'] + 1, timestamp)
-
-            print(f"✅ Sent to {to_email} | Sheet: {sub_sheet_name} | Row: {i}")
-
+        try:
+            send_email(smtp_user, smtp_pass, email_id, subject, full_body)
+            worksheet.update_acell(f"H{i}", "Mail Sent Successfully")
+            worksheet.update_acell(f"I{i}", now_ist.strftime("%d-%m-%Y %H:%M:%S"))
         except Exception as e:
-            print(f"❌ Row {i} failed: {e}")
+            print(f"❌ Failed to send to row {i}: {e}")
+            worksheet.update_acell(f"H{i}", f"Failed: {str(e)}")
+
+        if IS_MANUAL:
+            sleep(1)
