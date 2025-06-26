@@ -2,12 +2,13 @@ name: Auto Email Sender
 
 on:
   schedule:
-    - cron: '*/1 * * * *'
-  workflow_dispatch:
+    - cron: '*/1 * * * *'  # Runs every 1 minute
+  workflow_dispatch:       # Allows manual triggering via "Run workflow" button
 
 jobs:
   send_mail:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
