@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, make_response
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pytz
@@ -35,10 +35,15 @@ def track():
     except Exception as e:
         print("❌ ERROR in /track:", e)
 
-    # Return 1x1 transparent tracking GIF
+    # Return 1x1 transparent tracking GIF with proper headers
     pixel = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04' +
                        b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
-    return send_file(pixel, mimetype='image/gif')
+    response = make_response(send_file(pixel, mimetype='image/gif'))
+    response.headers['Content-Disposition'] = 'inline; filename="track.gif"'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route("/")
 def index():
