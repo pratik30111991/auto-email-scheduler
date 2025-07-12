@@ -25,8 +25,8 @@ domain_configs = domain_sheet.get_all_records()
 
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
-    msg["Subject"] = subject
-    msg["From"] = sender_email
+    msg["Subject"] = subject.strip().replace("\n", " ")  # FIXED: no folded header
+    msg["From"] = f"Unlisted Radar <{sender_email}>"     # FIXED: custom display name
     msg["To"] = recipient
     try:
         context = ssl.create_default_context()
@@ -95,14 +95,14 @@ for domain in domain_configs:
             print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
             continue
 
-        name = row.get("Name", "").replace("\n", " ").replace("\r", " ").strip()
-        email = row.get("Email ID", "").strip()
-        subject = row.get("Subject", "").replace("\n", " ").replace("\r", " ").strip()
-        message = row.get("Message", "").strip()
+        name = row.get("Name", "")
+        email = row.get("Email ID", "")
+        subject = row.get("Subject", "").strip().replace("\n", " ")  # FIXED: Remove any newlines
+        message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
         tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;" alt="">'
-        full_body = f"""Hi <b>{first_name}</b>,<br><br>{message}{tracking_pixel}"""
+        full_body = f"""{message}{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
