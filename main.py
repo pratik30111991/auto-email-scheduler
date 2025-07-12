@@ -47,7 +47,7 @@ key_map = {
     "Dilshad_Mails": "SMTP_DILSHAD",
     "Nana_Mails": "SMTP_NANA",
     "Gaurav_Mails": "SMTP_GAURAV",
-    "Info_Mails": "SMTP_INFO"
+    "Info_Mails": "SMTP_INFO",
     "Sales_Mails": "SMTP_SALES"
 }
 
