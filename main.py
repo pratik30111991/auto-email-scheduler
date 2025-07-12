@@ -70,8 +70,6 @@ for domain in domain_configs:
         print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
-    cell_updates = []
-
     for i, row in enumerate(rows, start=2):
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
@@ -103,20 +101,20 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
+        # Ensure images are embedded and not blocked by Gmail
+        # Add tracking pixel
         tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;" alt="">'
         full_body = f"""{message}{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
 
-        status_text = "Mail Sent Successfully" if success else "Failed to Send"
-        cell_updates.append({'range': f"H{i}", 'values': [[status_text]]})
+        time.sleep(1)
         if success:
-            cell_updates.append({'range': f"I{i}", 'values': [[timestamp]]})
-
-    if cell_updates:
-        body = {
-            "valueInputOption": "USER_ENTERED",
-            "data": cell_updates
-        }
-        client.request('post', f'https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}/values:batchUpdate', json=body)
+            subsheet.update_cell(i, 8, "Mail Sent Successfully")
+            time.sleep(1)
+            subsheet.update_cell(i, 9, timestamp)
+        else:
+            subsheet.update_cell(i, 8, "Failed to Send")
+            time.sleep(1)
+            subsheet.update_cell(i, 9, timestamp)
