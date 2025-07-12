@@ -48,6 +48,7 @@ key_map = {
     "Nana_Mails": "SMTP_NANA",
     "Gaurav_Mails": "SMTP_GAURAV",
     "Info_Mails": "SMTP_INFO"
+    "Sales_Mails": "SMTP_SALES"
 }
 
 for domain in domain_configs:
