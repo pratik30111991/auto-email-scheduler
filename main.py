@@ -25,8 +25,8 @@ domain_configs = domain_sheet.get_all_records()
 
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
-    msg["Subject"] = subject.strip().replace("\n", " ")  # FIXED: no folded header
-    msg["From"] = f"Unlisted Radar <{sender_email}>"     # FIXED: custom display name
+    msg["Subject"] = subject.strip().replace("\n", " ")
+    msg["From"] = f"Unlisted Radar <{sender_email}>"
     msg["To"] = recipient
     try:
         context = ssl.create_default_context()
@@ -70,6 +70,8 @@ for domain in domain_configs:
         print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
+    cell_updates = []
+
     for i, row in enumerate(rows, start=2):
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
@@ -97,7 +99,7 @@ for domain in domain_configs:
 
         name = row.get("Name", "")
         email = row.get("Email ID", "")
-        subject = row.get("Subject", "").strip().replace("\n", " ")  # FIXED: Remove any newlines
+        subject = row.get("Subject", "").strip().replace("\n", " ")
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
@@ -106,8 +108,15 @@ for domain in domain_configs:
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
+
+        status_text = "Mail Sent Successfully" if success else "Failed to Send"
+        cell_updates.append({'range': f"H{i}", 'values': [[status_text]]})
         if success:
-            subsheet.update_cell(i, 8, "Mail Sent Successfully")
-            subsheet.update_cell(i, 9, timestamp)
-        else:
-            subsheet.update_cell(i, 8, "Failed to Send")
+            cell_updates.append({'range': f"I{i}", 'values': [[timestamp]]})
+
+    if cell_updates:
+        body = {
+            "valueInputOption": "USER_ENTERED",
+            "data": cell_updates
+        }
+        client.request('post', f'https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}/values:batchUpdate', json=body)
