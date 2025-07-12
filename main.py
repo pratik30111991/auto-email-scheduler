@@ -6,13 +6,13 @@ from datetime import datetime
 import pytz
 import time
 import os
-import json
 
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
+# Load credentials
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -99,10 +99,10 @@ for domain in domain_configs:
         email = row.get("Email ID", "")
         subject = row.get("Subject", "")
         message = row.get("Message", "")
-        first_name = name.split()[0] if name else "Friend"
 
+        # ✅ Use raw HTML message directly from Google Sheet + tracking pixel (no greeting)
         tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;" alt="">'
-        full_body = f"""Hi <b>{first_name}</b>,<br><br>{message}{tracking_pixel}"""
+        full_body = f"""{message}{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
