@@ -28,7 +28,7 @@ jobs:
           SMTP_NANA: ${{ secrets.SMTP_NANA }}
           SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
           SMTP_INFO: ${{ secrets.SMTP_INFO }}
-          SMTP_Sales: ${{ secrets.SMTP_Sales }}
+          SMTP_SALES: ${{ secrets.SMTP_SALES }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
           TRACKING_BACKEND_URL: https://email-tracker-3ce5.onrender.com
         run: |
