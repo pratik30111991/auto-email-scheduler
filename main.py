@@ -91,8 +91,16 @@ for domain in domain_configs:
             continue
 
         now = datetime.now(INDIA_TZ)
-        if now < schedule_dt:
-            print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
+        delta = (now - schedule_dt).total_seconds()
+
+        if delta < 0:
+            print(f"⏳ Not time yet for row {i} — scheduled: {schedule_dt}, now: {now}")
+            continue
+        elif delta > 5 * 60:
+            print(f"🕒 Missed sending window for row {i} — scheduled: {schedule_dt}, now: {now}")
+            subsheet.update_cell(i, 8, "Missed Window")
+            time.sleep(1)
+            subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
             continue
 
         name = row.get("Name", "")
@@ -101,8 +109,6 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # Ensure images are embedded and not blocked by Gmail
-        # Add tracking pixel
         tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;" alt="">'
         full_body = f"""{message}{tracking_pixel}"""
 
