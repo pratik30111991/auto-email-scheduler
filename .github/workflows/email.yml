@@ -2,7 +2,7 @@ name: Auto Email Sender
 
 on:
   schedule:
-    - cron: '*/2 * * * *'  # Runs every 1 minute
+    - cron: '*/1 * * * *'  # Runs every 1 minute
   workflow_dispatch:       # Allows manual triggering via "Run workflow" button
 
 jobs:
