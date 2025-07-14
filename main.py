@@ -7,7 +7,6 @@ from datetime import datetime
 import pytz
 import time
 import os
-import json
 
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
@@ -74,10 +73,13 @@ for domain in domain_configs:
     for i, row in enumerate(rows, start=2):
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
+
         if status not in ["", "pending"]:
             continue
 
+        # Parse schedule time
         parsed = False
+        schedule_dt = None
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
             try:
                 schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt))
@@ -85,8 +87,12 @@ for domain in domain_configs:
                 break
             except:
                 continue
-        if not parsed:
-            print(f"⛔ Row {i} invalid date format: '{schedule}' — skipping")
+
+        if not parsed or not schedule_dt:
+            print(f"⛔ Row {i} skipped — Invalid or empty Schedule Date & Time: '{schedule}'")
+            subsheet.update_cell(i, 8, "Failed to Send")  # Status
+            subsheet.update_cell(i, 9, datetime.now(INDIA_TZ).strftime("%d-%m-%Y %H:%M:%S"))  # Timestamp
+            time.sleep(1)
             continue
 
         now = datetime.now(INDIA_TZ)
@@ -94,11 +100,20 @@ for domain in domain_configs:
             print(f"⏳ Row {i} not time yet — scheduled at {schedule_dt}, now {now}")
             continue
 
-        # **No upper-time limit**: email will send any time after scheduled
-        name = row.get("Name", "")
-        email = row.get("Email ID", "")
+        # Validate required fields
+        name = row.get("Name", "").strip()
+        email = row.get("Email ID", "").strip()
         subject = row.get("Subject", "").strip().replace("\n", " ")
         message = row.get("Message", "")
+
+        if not name or not email:
+            print(f"❌ Row {i} skipped — Name or Email is missing")
+            subsheet.update_cell(i, 8, "Failed to Send")
+            subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
+            time.sleep(1)
+            continue
+
+        # Add tracking pixel only if sending email
         tracking_pixel = (
             f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
             'width="1" height="1" alt="." style="opacity:0;">'
@@ -106,10 +121,9 @@ for domain in domain_configs:
         full_body = f"{message}{tracking_pixel}"
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
-        timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
-        time.sleep(1)
-
         status_text = "Mail Sent Successfully" if success else "Failed to Send"
+
         subsheet.update_cell(i, 8, status_text)
         time.sleep(1)
-        subsheet.update_cell(i, 9, timestamp)
+        subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
+        time.sleep(1)
