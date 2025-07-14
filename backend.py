@@ -35,9 +35,10 @@ def track():
     logger.info(f"📩 Tracking pixel hit → sheet={sheet_name}, row={row}, UA={user_agent}")
 
     # Avoid bots triggering open tracking
-    bot_keywords = ["google", "bot", "crawler", "curl", "wget", "python", "monitor", "uptime"]
-    if any(keyword in user_agent for keyword in bot_keywords):
-        logger.warning("🤖 Ignored bot hit on tracking pixel.")
+    bot_keywords = ["bot", "crawler", "curl", "wget", "python", "uptime"]
+    # Don't skip Gmail proxies (they include 'google' in UA), allow open tracking
+    if any(k in user_agent for k in bot_keywords):
+        logger.warning(f"🤖 Ignored bot hit on tracking pixel. UA: {user_agent}")
         return send_pixel()
 
     try:
