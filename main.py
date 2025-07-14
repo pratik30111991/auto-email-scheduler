@@ -1,4 +1,3 @@
-# ─── main.py ─────────────────────────────────────────────────────────────
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -77,7 +76,6 @@ for domain in domain_configs:
         if status not in ["", "pending"]:
             continue
 
-        # Parse schedule time
         parsed = False
         schedule_dt = None
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
@@ -96,28 +94,30 @@ for domain in domain_configs:
             continue
 
         now = datetime.now(INDIA_TZ)
+        now_str = now.strftime("%d/%m/%Y %H:%M")
+        sched_str = schedule_dt.strftime("%d/%m/%Y %H:%M")
 
-        # ✅ Log debug info for timing
-        print(f"🕒 DEBUG Row {i}: now = {now.strftime('%d/%m/%Y %H:%M:%S')} | scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M:%S')}")
+        print(f"🕒 TIME CHECK Row {i}: now = {now_str}, scheduled = {sched_str}")
 
-        if now < schedule_dt:
-            print(f"⏳ SKIP Row {i} — Scheduled at {schedule_dt}, Current time {now}")
+        if now_str != sched_str:
+            print(f"⏳ SKIP Row {i} — Not exact time match.")
             continue
+        else:
+            print(f"✅ Row {i} — Time matched exactly, sending email.")
 
-        # Validate required fields
+        # Validate fields
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
         subject = row.get("Subject", "").strip().replace("\n", " ")
         message = row.get("Message", "")
 
         if not name or not email:
-            print(f"❌ Row {i} skipped — Name or Email is missing")
+            print(f"❌ Row {i} skipped — Name or Email missing")
             subsheet.update_cell(i, 8, "Failed to Send")
             subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
             time.sleep(1)
             continue
 
-        # 🔒 Secure tracking with email in URL
         tracking_pixel = (
             f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}&email={email}" '
             'width="1" height="1" alt="." style="opacity:0;">'
@@ -131,6 +131,3 @@ for domain in domain_configs:
         time.sleep(1)
         subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
         time.sleep(1)
-
-        # Optional: update "Last Checked At" in column 11
-        # subsheet.update_cell(i, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
