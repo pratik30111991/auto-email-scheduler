@@ -95,11 +95,12 @@ for domain in domain_configs:
 
         print(f"🕒 Row {i} → Now: {now}, Scheduled: {schedule_dt}, Δ: {time_diff:.2f} sec")
 
-        if time_diff > 90:
+        # Allow sending from 5 min before to 15 min after
+        if time_diff > 300:
             print(f"⏳ Too early for row {i}, skipping")
             continue
-        elif time_diff < -3600:
-            print(f"⚠️ Too late (over 1 hour old), skipping row {i}")
+        elif time_diff < -900:
+            print(f"⚠️ Too late (over 15 min old), skipping row {i}")
             continue
 
         name = row.get("Name", "")
@@ -108,7 +109,8 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:none;" alt="">'
+        # Track opens (use display:block so Gmail loads it)
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block;" alt="">'
         full_body = f"""{message}{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
