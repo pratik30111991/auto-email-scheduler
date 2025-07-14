@@ -91,16 +91,15 @@ for domain in domain_configs:
             continue
 
         now = datetime.now(INDIA_TZ)
-        delta = (now - schedule_dt).total_seconds()
+        time_diff = (schedule_dt - now).total_seconds()
 
-        if delta < 0:
-            print(f"⏳ Not time yet for row {i} — scheduled: {schedule_dt}, now: {now}")
+        print(f"🕒 Row {i} → Now: {now}, Scheduled: {schedule_dt}, Δ: {time_diff:.2f} sec")
+
+        if time_diff > 90:
+            print(f"⏳ Too early for row {i}, skipping")
             continue
-        elif delta > 5 * 60:
-            print(f"🕒 Missed sending window for row {i} — scheduled: {schedule_dt}, now: {now}")
-            subsheet.update_cell(i, 8, "Missed Window")
-            time.sleep(1)
-            subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
+        elif time_diff < -3600:
+            print(f"⚠️ Too late (over 1 hour old), skipping row {i}")
             continue
 
         name = row.get("Name", "")
