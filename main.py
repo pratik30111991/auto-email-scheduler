@@ -1,3 +1,4 @@
+# ─── main.py ─────────────────────────────────────────────────────────────
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -70,14 +71,26 @@ for domain in domain_configs:
         continue
 
     for i, row in enumerate(rows, start=2):
+        name = row.get("Name", "").strip()
+        email = row.get("Email ID", "").strip()
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        if status not in ["", "pending"]:
+        now = datetime.now(INDIA_TZ)
+        timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
+
+        # Skip if already sent or invalid input
+        if status not in ["", "pending"] or not schedule:
+            continue
+
+        # Skip if Name or Email ID is missing
+        if not name or not email:
+            subsheet.update_cell(i, 8, "Failed to Send")
+            subsheet.update_cell(i, 9, timestamp)
+            print(f"⛔ Row {i} skipped — missing Name/Email.")
             continue
 
         parsed = False
-        schedule_dt = None
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
             try:
                 schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt))
@@ -86,48 +99,31 @@ for domain in domain_configs:
             except:
                 continue
 
-        if not parsed or not schedule_dt:
-            print(f"⛔ Row {i} skipped — Invalid or empty Schedule Date & Time: '{schedule}'")
+        if not parsed:
             subsheet.update_cell(i, 8, "Failed to Send")
-            subsheet.update_cell(i, 9, datetime.now(INDIA_TZ).strftime("%d-%m-%Y %H:%M:%S"))
-            time.sleep(1)
+            subsheet.update_cell(i, 9, timestamp)
+            print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        now = datetime.now(INDIA_TZ)
-        now_str = now.strftime("%d/%m/%Y %H:%M")
-        sched_str = schedule_dt.strftime("%d/%m/%Y %H:%M")
-
-        print(f"🕒 TIME CHECK Row {i}: now = {now_str}, scheduled = {sched_str}")
-
-        if now_str != sched_str:
+        # ⏰ EXACT-TIME CHECK: only run if exact match down to the minute
+        print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M')}")
+        if now.strftime("%d/%m/%Y %H:%M") != schedule_dt.strftime("%d/%m/%Y %H:%M"):
             print(f"⏳ SKIP Row {i} — Not exact time match.")
             continue
-        else:
-            print(f"✅ Row {i} — Time matched exactly, sending email.")
 
-        # Validate fields
-        name = row.get("Name", "").strip()
-        email = row.get("Email ID", "").strip()
-        subject = row.get("Subject", "").strip().replace("\n", " ")
+        subject = row.get("Subject", "").strip()
         message = row.get("Message", "")
-
-        if not name or not email:
-            print(f"❌ Row {i} skipped — Name or Email missing")
-            subsheet.update_cell(i, 8, "Failed to Send")
-            subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
-            time.sleep(1)
-            continue
-
         tracking_pixel = (
-            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}&email={email}" '
+            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
             'width="1" height="1" alt="." style="opacity:0;">'
         )
         full_body = f"{message}{tracking_pixel}"
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
-        status_text = "Mail Sent Successfully" if success else "Failed to Send"
-
-        subsheet.update_cell(i, 8, status_text)
         time.sleep(1)
-        subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
+
+        status_text = "Mail Sent Successfully" if success else "Failed to Send"
+        subsheet.update_cell(i, 8, status_text)
+        subsheet.update_cell(i, 9, timestamp)
+        print(f"📤 Row {i}: {status_text}")
         time.sleep(1)
