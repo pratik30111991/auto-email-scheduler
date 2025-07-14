@@ -90,14 +90,18 @@ for domain in domain_configs:
 
         if not parsed or not schedule_dt:
             print(f"⛔ Row {i} skipped — Invalid or empty Schedule Date & Time: '{schedule}'")
-            subsheet.update_cell(i, 8, "Failed to Send")  # Status
-            subsheet.update_cell(i, 9, datetime.now(INDIA_TZ).strftime("%d-%m-%Y %H:%M:%S"))  # Timestamp
+            subsheet.update_cell(i, 8, "Failed to Send")
+            subsheet.update_cell(i, 9, datetime.now(INDIA_TZ).strftime("%d-%m-%Y %H:%M:%S"))
             time.sleep(1)
             continue
 
         now = datetime.now(INDIA_TZ)
+
+        # ✅ Log debug info for timing
+        print(f"🕒 DEBUG Row {i}: now = {now.strftime('%d/%m/%Y %H:%M:%S')} | scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M:%S')}")
+
         if now < schedule_dt:
-            print(f"⏳ Row {i} not time yet — scheduled at {schedule_dt}, now {now}")
+            print(f"⏳ SKIP Row {i} — Scheduled at {schedule_dt}, Current time {now}")
             continue
 
         # Validate required fields
@@ -113,7 +117,7 @@ for domain in domain_configs:
             time.sleep(1)
             continue
 
-        # Add secure tracking pixel
+        # 🔒 Secure tracking with email in URL
         tracking_pixel = (
             f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}&email={email}" '
             'width="1" height="1" alt="." style="opacity:0;">'
@@ -127,3 +131,6 @@ for domain in domain_configs:
         time.sleep(1)
         subsheet.update_cell(i, 9, now.strftime("%d-%m-%Y %H:%M:%S"))
         time.sleep(1)
+
+        # Optional: update "Last Checked At" in column 11
+        # subsheet.update_cell(i, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
