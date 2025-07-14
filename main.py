@@ -1,5 +1,4 @@
-# --- main.py ---
-
+# ─── main.py ─────────────────────────────────────────────────────────────
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -15,6 +14,7 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
+# Restore credentials file
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -35,7 +35,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
-
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
         imap.login(sender_email, password)
         imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
@@ -75,7 +74,6 @@ for domain in domain_configs:
     for i, row in enumerate(rows, start=2):
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
-
         if status not in ["", "pending"]:
             continue
 
@@ -87,34 +85,31 @@ for domain in domain_configs:
                 break
             except:
                 continue
-
         if not parsed:
-            print(f"⛔ Row {i} invalid date format: '{schedule}' — Skipping without updating status")
+            print(f"⛔ Row {i} invalid date format: '{schedule}' — skipping")
             continue
 
         now = datetime.now(INDIA_TZ)
         if now < schedule_dt:
-            print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
+            print(f"⏳ Row {i} not time yet — scheduled at {schedule_dt}, now {now}")
             continue
 
+        # **No upper-time limit**: email will send any time after scheduled
         name = row.get("Name", "")
         email = row.get("Email ID", "")
         subject = row.get("Subject", "").strip().replace("\n", " ")
         message = row.get("Message", "")
-        first_name = name.split()[0] if name else "Friend"
-
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" alt="." style="opacity:0;">'
-        full_body = f"""{message}{tracking_pixel}"""
+        tracking_pixel = (
+            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
+            'width="1" height="1" alt="." style="opacity:0;">'
+        )
+        full_body = f"{message}{tracking_pixel}"
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
-
         time.sleep(1)
-        if success:
-            subsheet.update_cell(i, 8, "Mail Sent Successfully")
-            time.sleep(1)
-            subsheet.update_cell(i, 9, timestamp)
-        else:
-            subsheet.update_cell(i, 8, "Failed to Send")
-            time.sleep(1)
-            subsheet.update_cell(i, 9, timestamp)
+
+        status_text = "Mail Sent Successfully" if success else "Failed to Send"
+        subsheet.update_cell(i, 8, status_text)
+        time.sleep(1)
+        subsheet.update_cell(i, 9, timestamp)
