@@ -1,3 +1,5 @@
+# --- main.py ---
+
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -91,16 +93,8 @@ for domain in domain_configs:
             continue
 
         now = datetime.now(INDIA_TZ)
-        time_diff = (schedule_dt - now).total_seconds()
-
-        print(f"🕒 Row {i} → Now: {now}, Scheduled: {schedule_dt}, Δ: {time_diff:.2f} sec")
-
-        # Allow sending from 5 min before to 15 min after
-        if time_diff > 300:
-            print(f"⏳ Too early for row {i}, skipping")
-            continue
-        elif time_diff < -900:
-            print(f"⚠️ Too late (over 15 min old), skipping row {i}")
+        if now < schedule_dt:
+            print(f"⏳ Not time yet for row {i} — Scheduled at {schedule_dt}, now is {now}")
             continue
 
         name = row.get("Name", "")
@@ -109,8 +103,7 @@ for domain in domain_configs:
         message = row.get("Message", "")
         first_name = name.split()[0] if name else "Friend"
 
-        # Track opens (use display:block so Gmail loads it)
-        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" style="display:block;" alt="">'
+        tracking_pixel = f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" width="1" height="1" alt="." style="opacity:0;">'
         full_body = f"""{message}{tracking_pixel}"""
 
         success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
