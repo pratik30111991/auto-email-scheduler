@@ -1,0 +1,51 @@
+name: Delete Old Workflow Runs
+
+on:
+  workflow_dispatch:  # This allows you to run it manually from GitHub UI
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    # Grant permission to delete workflow runs
+    permissions:
+      actions: write
+
+    steps:
+      - name: Delete workflow runs before 13 July 2025
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cutoffDate = new Date("2025-07-13T00:00:00Z");
+            const perPage = 100;
+
+            let page = 1;
+            let deleted = 0;
+
+            while (true) {
+              const runs = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: perPage,
+                page: page
+              });
+
+              if (runs.data.workflow_runs.length === 0) break;
+
+              for (const run of runs.data.workflow_runs) {
+                const createdAt = new Date(run.created_at);
+                if (createdAt < cutoffDate) {
+                  await github.rest.actions.deleteWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id
+                  });
+                  deleted++;
+                  console.log(`🗑️ Deleted run ${run.id} from ${createdAt}`);
+                }
+              }
+
+              page++;
+            }
+
+            console.log(`✅ Total old runs deleted: ${deleted}`);
