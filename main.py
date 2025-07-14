@@ -113,9 +113,9 @@ for domain in domain_configs:
             time.sleep(1)
             continue
 
-        # Add tracking pixel only if sending email
+        # Add secure tracking pixel
         tracking_pixel = (
-            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
+            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}&email={email}" '
             'width="1" height="1" alt="." style="opacity:0;">'
         )
         full_body = f"{message}{tracking_pixel}"
