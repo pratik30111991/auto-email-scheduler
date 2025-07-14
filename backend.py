@@ -21,7 +21,7 @@ def send_pixel():
     )
     response = make_response(send_file(pixel, mimetype='image/gif'))
     response.headers['Content-Disposition'] = 'inline; filename="track.gif"'
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
@@ -32,11 +32,10 @@ def track():
     row = request.args.get("row")
     user_agent = request.headers.get("User-Agent", "").lower()
 
-    logger.info(f"📩 Tracking pixel hit → sheet={sheet_name}, row={row}, UA={user_agent}")
+    logger.info(f"\U0001f4e9 Tracking pixel hit → sheet={sheet_name}, row={row}, UA={user_agent}")
 
     # Avoid bots triggering open tracking
     bot_keywords = ["bot", "crawler", "curl", "wget", "python", "uptime"]
-    # Don't skip Gmail proxies (they include 'google' in UA), allow open tracking
     if any(k in user_agent for k in bot_keywords):
         logger.warning(f"🤖 Ignored bot hit on tracking pixel. UA: {user_agent}")
         return send_pixel()
