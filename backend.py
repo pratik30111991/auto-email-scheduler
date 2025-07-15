@@ -10,32 +10,40 @@ app = Flask(__name__)
 SCOPES = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 CREDS_FILE = 'credentials.json'
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-
-# Auth + Spreadsheet
-creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
-client = gspread.authorize(creds)
-spreadsheet = client.open_by_key(SPREADSHEET_ID)
-
 IST = pytz.timezone("Asia/Kolkata")
+
+def get_spreadsheet():
+    # ✅ Create credentials.json from env if not present
+    if not os.path.exists(CREDS_FILE):
+        google_json = os.environ.get("GOOGLE_JSON", "")
+        if not google_json.strip():
+            raise Exception("❌ GOOGLE_JSON not found in environment.")
+        with open(CREDS_FILE, "w") as f:
+            f.write(google_json)
+    
+    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
+    client = gspread.authorize(creds)
+    return client.open_by_key(SPREADSHEET_ID)
 
 @app.route('/track', methods=['GET'])
 def track_email_open():
-    sheet_name = request.args.get('sheet')
-    row = request.args.get('row')
-    email_param = request.args.get('email', '').strip().lower()
-
-    user_agent = request.headers.get('User-Agent', '')
-    now = datetime.datetime.now(IST)
-
-    if not sheet_name or not row or not email_param:
-        print("[❌ MISSING PARAMS]", sheet_name, row, email_param)
-        return '', 204
-
-    if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
-        print(f"[IGNORED: PROXY] {email_param} ({user_agent})")
-        return '', 204
-
     try:
+        spreadsheet = get_spreadsheet()
+        sheet_name = request.args.get('sheet')
+        row = request.args.get('row')
+        email_param = request.args.get('email', '').strip().lower()
+
+        user_agent = request.headers.get('User-Agent', '')
+        now = datetime.datetime.now(IST)
+
+        if not sheet_name or not row or not email_param:
+            print("[❌ MISSING PARAMS]", sheet_name, row, email_param)
+            return '', 204
+
+        if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
+            print(f"[IGNORED: PROXY] {email_param} ({user_agent})")
+            return '', 204
+
         worksheet = spreadsheet.worksheet(sheet_name)
         row = int(row)
 
@@ -75,11 +83,10 @@ def track_email_open():
         print(f"[✅ MARKED OPEN] Row {row} for {email_param}")
 
     except Exception as e:
-        print(f"[❌ ERROR] Tracking error for {email_param}: {e}")
+        print(f"[❌ ERROR] Tracking error: {e}")
         return make_response('Internal Server Error', 500)
 
     return '', 204
-
 
 @app.route('/')
 def home():
