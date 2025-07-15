@@ -1,4 +1,6 @@
-# ─── main.py ─────────────────────────────────────────────────────────────
+# ========================
+# ✅ FINAL main.py
+# ========================
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -72,18 +74,22 @@ for domain in domain_configs:
 
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
-        email = row.get("Email ID", "").strip()
+        email = row.get("Email ID", "").strip().lower()
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
         now = datetime.now(INDIA_TZ)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
 
-        # Skip if already sent or invalid input
-        if status not in ["", "pending"] or not schedule:
+        if status not in ["", "pending"]:
             continue
 
-        # Skip if Name or Email ID is missing
+        if not schedule:
+            subsheet.update_cell(i, 8, "Failed to Send")
+            subsheet.update_cell(i, 9, timestamp)
+            print(f"❌ Row {i} skipped — no schedule time.")
+            continue
+
         if not name or not email:
             subsheet.update_cell(i, 8, "Failed to Send")
             subsheet.update_cell(i, 9, timestamp)
@@ -105,7 +111,6 @@ for domain in domain_configs:
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        # ⏰ EXACT-TIME CHECK: only run if exact match down to the minute
         print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M')}")
         if now.strftime("%d/%m/%Y %H:%M") != schedule_dt.strftime("%d/%m/%Y %H:%M"):
             print(f"⏳ SKIP Row {i} — Not exact time match.")
@@ -114,7 +119,7 @@ for domain in domain_configs:
         subject = row.get("Subject", "").strip()
         message = row.get("Message", "")
         tracking_pixel = (
-            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}" '
+            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}&email={email}" '
             'width="1" height="1" alt="." style="opacity:0;">'
         )
         full_body = f"{message}{tracking_pixel}"
