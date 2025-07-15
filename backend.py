@@ -52,9 +52,9 @@ def track_email_open():
         except Exception as e:
             print(f"[WARN] Could not parse send time: {e}")
 
-        worksheet.update_cell(row, 10, "Yes")  # "Open?"
-        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))  # "Open Timestamp"
-        print(f"[OPENED] Email opened by {email_param}, row {row}")
+        worksheet.update_cell(row, 10, "Yes")
+        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
+        print(f"[UPDATED] Open? marked Yes for {email_param} in row {row}")
 
     except Exception as e:
         print(f"❌ Error in tracking: {e}")
