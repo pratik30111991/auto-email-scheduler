@@ -2,7 +2,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
 from email.mime.text import MIMEText
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import time
 import os
@@ -23,6 +23,14 @@ sheet = client.open_by_key(SPREADSHEET_ID)
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
 
+key_map = {
+    "Dilshad_Mails": "SMTP_DILSHAD",
+    "Nana_Mails": "SMTP_NANA",
+    "Gaurav_Mails": "SMTP_GAURAV",
+    "Info_Mails": "SMTP_INFO",
+    "Sales_Mails": "SMTP_SALES"
+}
+
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
     msg["Subject"] = subject.strip().replace("\n", " ")
@@ -41,14 +49,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     except Exception as e:
         print("❌ Email sending failed:", e)
         return False
-
-key_map = {
-    "Dilshad_Mails": "SMTP_DILSHAD",
-    "Nana_Mails": "SMTP_NANA",
-    "Gaurav_Mails": "SMTP_GAURAV",
-    "Info_Mails": "SMTP_INFO",
-    "Sales_Mails": "SMTP_SALES"
-}
 
 for domain in domain_configs:
     sub_sheet_name = domain["SubSheet Name"]
@@ -69,8 +69,9 @@ for domain in domain_configs:
         print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
-    updates = []
     now = datetime.now(INDIA_TZ).replace(second=0, microsecond=0)
+    timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
+    updates = []
 
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
@@ -83,10 +84,12 @@ for domain in domain_configs:
 
         if not name or not email:
             updates.append((i, 8, "Failed to Send"))
-            updates.append((i, 9, now.strftime("%d-%m-%Y %H:%M:%S")))
+            updates.append((i, 9, timestamp))
+            print(f"⛔ Row {i} skipped — missing Name/Email.")
             continue
 
         if not schedule:
+            print(f"ℹ️ Row {i} skipped — no schedule time.")
             continue
 
         parsed = False
@@ -100,10 +103,12 @@ for domain in domain_configs:
 
         if not parsed:
             updates.append((i, 8, "Skipped: Invalid Date Format"))
-            updates.append((i, 9, now.strftime("%d-%m-%Y %H:%M:%S")))
+            updates.append((i, 9, timestamp))
+            print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        if not (schedule_dt <= now < schedule_dt + timedelta(minutes=1)):
+        if now != schedule_dt:
+            print(f"⏳ SKIP Row {i} — Time not matched: now={now}, schedule={schedule_dt}")
             continue
 
         subject = row.get("Subject", "").strip()
@@ -119,7 +124,9 @@ for domain in domain_configs:
 
         status_text = "Mail Sent Successfully" if success else "Failed to Send"
         updates.append((i, 8, status_text))
-        updates.append((i, 9, now.strftime("%d-%m-%Y %H:%M:%S")))
+        updates.append((i, 9, timestamp))
+        print(f"📤 Row {i}: {status_text}")
+        time.sleep(1)
 
     for row, col, val in updates:
         try:
