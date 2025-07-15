@@ -1,4 +1,3 @@
-# main.py
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -14,6 +13,7 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
+# Load credentials.json from env
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -90,8 +90,8 @@ for domain in domain_configs:
             continue
 
         if not schedule:
-            print(f"❌ Row {i} skipped — no schedule time.")
-            continue  # No update for blank date/time
+            print(f"ℹ️ Row {i} skipped — no schedule time.")
+            continue  # clean skip for blank
 
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
@@ -108,8 +108,8 @@ for domain in domain_configs:
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M')}")
-        if now.strftime("%d/%m/%Y %H:%M") != schedule_dt.strftime("%d/%m/%Y %H:%M"):
+        print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M:%S')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M:%S')}")
+        if now.replace(second=0) != schedule_dt.replace(second=0):
             print(f"⏳ SKIP Row {i} — Not exact time match.")
             continue
 
