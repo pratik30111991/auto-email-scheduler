@@ -4,5 +4,5 @@ pytz
 imaplib2
 python-dotenv
 schedule
-flask
+Flask
 gunicorn
