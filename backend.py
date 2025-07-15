@@ -24,51 +24,52 @@ def track_email_open():
     email_param = request.args.get('email', '').strip().lower()
 
     user_agent = request.headers.get('User-Agent', '')
-    ip = request.remote_addr
     now = datetime.datetime.now(IST)
 
     if not sheet_name or not row or not email_param:
         return '', 204
 
-    # Block Gmail and Google Proxy preloaders
+    # BLOCK: Google Proxy preloading
     if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
-        print(f"[IGNORED] Proxy hit by {email_param} (User-Agent: {user_agent})")
+        print(f"[IGNORED: PROXY] {email_param} ({user_agent})")
         return '', 204
 
     try:
         worksheet = spreadsheet.worksheet(sheet_name)
         row = int(row)
 
-        # Verify email matches the actual row's email
-        email_sheet = worksheet.cell(row, 3).value  # Column C = Email
-        if not email_sheet or email_sheet.strip().lower() != email_param:
-            print(f"[SKIP] Email mismatch at row {row}: sheet={email_sheet}, param={email_param}")
+        sheet_email = worksheet.cell(row, 3).value  # Column C = Email
+        if not sheet_email or sheet_email.strip().lower() != email_param:
+            print(f"[SKIP] Email mismatch at row {row}: sheet={sheet_email}, param={email_param}")
             return '', 204
 
-        # Already marked open
-        open_status = worksheet.cell(row, 10).value  # Column J = "Open?"
+        open_status = worksheet.cell(row, 10).value  # Column J = Open?
         if open_status and open_status.strip().lower() == "yes":
             return '', 204
 
-        # Check delay after send timestamp (Column I)
-        send_time_str = worksheet.cell(row, 9).value  # Column I = "Timestamp"
+        send_time_str = worksheet.cell(row, 9).value  # Column I = Timestamp
+        allow_update = True
+
         if send_time_str:
             try:
                 send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
-                if (now - send_time).total_seconds() < 60:
-                    print(f"[IGNORED] Too soon for {email_param} (row {row})")
-                    return '', 204
+                delay = (now - send_time).total_seconds()
+                if delay < 10:  # Delay is less than 10 seconds
+                    print(f"[IGNORED] Delay only {delay:.1f}s for {email_param} — suspicious")
+                    allow_update = False
             except Exception as e:
-                print(f"[WARN] Timestamp parse failed for row {row}: {e}")
-                return '', 204
+                print(f"[WARN] Invalid send timestamp for row {row}: {e}")
+                allow_update = False
         else:
-            print(f"[SKIP] No send timestamp in row {row}")
-            return '', 204
+            print(f"[SKIP] No timestamp in row {row}")
+            allow_update = False
 
-        # Mark as opened
-        worksheet.update_cell(row, 10, "Yes")  # Column J = "Open?"
-        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))  # Column K = Open Timestamp
-        print(f"[UPDATED] Marked Open for {email_param} (row {row})")
+        if allow_update:
+            worksheet.update_cell(row, 10, "Yes")
+            worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
+            print(f"[✅ UPDATED] Open tracked for {email_param} (row {row})")
+        else:
+            print(f"[SKIPPED] Valid request but skipped update for {email_param} (row {row})")
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
@@ -79,6 +80,3 @@ def track_email_open():
 @app.route('/')
 def home():
     return '✅ Tracking backend is live.'
-
-if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
