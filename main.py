@@ -77,10 +77,12 @@ for domain in domain_configs:
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
-        status = row.get("Status", "").strip().lower()
+        raw_status = row.get("Status", "").strip()
+        status = raw_status.lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
         if status in ["mail sent successfully", "failed to send", "skipped: invalid date format"]:
+            print(f"✅ Row {i} skipped — already processed (Status: '{raw_status}')")
             continue
 
         if not name or not email:
@@ -96,7 +98,8 @@ for domain in domain_configs:
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
             try:
-                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt)).replace(second=0, microsecond=0)
+                schedule_dt = datetime.strptime(schedule, fmt)
+                schedule_dt = INDIA_TZ.localize(schedule_dt).replace(second=0, microsecond=0)
                 parsed = True
                 break
             except:
@@ -109,7 +112,7 @@ for domain in domain_configs:
             continue
 
         if now < schedule_dt:
-            print(f"⏳ SKIP Row {i} — Scheduled for future: now={now}, schedule={schedule_dt}")
+            print(f"⏳ Row {i} skipped — future schedule: {schedule_dt}")
             continue
 
         subject = row.get("Subject", "").strip()
