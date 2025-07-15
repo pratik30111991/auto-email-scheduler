@@ -91,7 +91,7 @@ for domain in domain_configs:
 
         if not schedule:
             print(f"❌ Row {i} skipped — no schedule time.")
-            continue  # Do not update anything if schedule is blank
+            continue  # No update for blank date/time
 
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
