@@ -1,10 +1,11 @@
-from flask import Flask, request
+from flask import Flask, request, send_file
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pytz
 import os
 from gspread.utils import rowcol_to_a1
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -38,9 +39,9 @@ def track():
             print(f"⚠️ Row {row} too short — skipping.")
             return "", 204
 
-        stored_email = values[1].strip().lower()  # Col B
-        stored_status = values[7].strip().lower()  # Col H
-        stored_timestamp = values[8].strip()       # Col I
+        stored_email = values[1].strip().lower()
+        stored_status = values[7].strip().lower()
+        stored_timestamp = values[8].strip()
 
         print(f"📩 Tracking pixel hit → sheet={sheet_name}, row={row}, email={stored_email}, UA={ua}")
 
@@ -59,11 +60,10 @@ def track():
             print(f"⚠️ Invalid timestamp: {stored_timestamp} — {e}")
             return "", 204
 
-        # ✅ Update "Open?" column (Col J = 10) and "Open Timestamp" (Col K = 11)
         sheet.update_acell(rowcol_to_a1(row, 10), "Yes")
         sheet.update_acell(rowcol_to_a1(row, 11), now.strftime("%d-%m-%Y %H:%M:%S"))
-        print(f"✅ SUCCESS: Open? = 'Yes' and Open Timestamp updated in row {row}")
-        return "", 200
+        print(f"✅ SUCCESS: Open? marked 'Yes' in sheet '{sheet_name}', row {row}")
+        return send_file(BytesIO(b""), mimetype="image/png")
 
     except Exception as e:
         print("❌ ERROR in /track:", e)
@@ -71,4 +71,3 @@ def track():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-    
