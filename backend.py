@@ -1,73 +1,105 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, make_response
+import os
+import datetime
+import pytz
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-import pytz
-import os
-from gspread.utils import rowcol_to_a1
-from io import BytesIO
+import re
 
 app = Flask(__name__)
 
-INDIA_TZ = pytz.timezone("Asia/Kolkata")
-SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-JSON_FILE = "credentials.json"
+# Google Sheet setup
+SCOPES = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+CREDS_FILE = 'credentials.json'  # Upload this to Render
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
-if not os.path.exists(JSON_FILE):
-    with open(JSON_FILE, "w") as f:
-        f.write(os.environ["GOOGLE_JSON"])
-
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+# Load Google Sheets API
+creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
 client = gspread.authorize(creds)
 
-@app.route("/track")
+# Timezone
+IST = pytz.timezone("Asia/Kolkata")
+
+# Helper: Validate GoogleImageProxy or not
+def is_proxy(user_agent):
+    return 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower()
+
+# Helper: Force Capital Email
+def normalize_email(email):
+    return email.strip().lower()
+
+@app.route('/track', methods=['GET'])
 def track():
+    sheet_name = request.args.get('sheet')
+    row = request.args.get('row')
+    email = request.args.get('email')
+
+    if not (sheet_name and row and email):
+        return make_response('Missing parameters', 400)
+
+    row = int(row)
+    email = normalize_email(email)
+
+    ua = request.headers.get('User-Agent', '')
+    is_gmail_proxy = is_proxy(ua)
+
+    # Get sheet
     try:
-        sheet_name = request.args.get("sheet", "").strip()
-        row = int(request.args.get("row", "0"))
-        email_param = request.args.get("email", "").strip().lower()
-        ua = request.headers.get("User-Agent", "").lower()
-
-        if not sheet_name or not row or not email_param:
-            return "", 400
-
         sheet = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
-        values = sheet.row_values(row)
+    except Exception as e:
+        print(f"❌ Error: Unable to open sheet: {e}")
+        return make_response('Sheet error', 500)
 
-        if len(values) < 9:
-            print(f"⚠️ Row {row} too short — skipping.")
-            return "", 204
+    # Read target row data
+    try:
+        row_data = sheet.row_values(row)
+        if len(row_data) < 1:
+            print(f"⚠️ Empty row {row} in sheet {sheet_name}")
+            return ('', 204)
 
-        stored_email = values[1].strip().lower()
-        stored_status = values[7].strip().lower()
-        stored_timestamp = values[8].strip()
+        header = sheet.row_values(1)
+        col_map = {col.strip().lower(): idx+1 for idx, col in enumerate(header)}
 
-        print(f"📩 Tracking pixel hit → sheet={sheet_name}, row={row}, email={stored_email}, UA={ua}")
+        email_col = col_map.get("email")
+        open_col = col_map.get("open?")
+        timestamp_col = col_map.get("open timestamp")
 
-        if stored_email != email_param:
-            print(f"⚠️ Email mismatch: {email_param} != {stored_email} — skipping.")
-            return "", 204
+        if not (email_col and open_col and timestamp_col):
+            print("⚠️ Required columns missing")
+            return ('', 204)
 
-        try:
-            sent_time = INDIA_TZ.localize(datetime.strptime(stored_timestamp, "%d-%m-%Y %H:%M:%S"))
-            now = datetime.now(INDIA_TZ)
-            delta = (now - sent_time).total_seconds()
-            if delta < 5:
-                print(f"⏳ Too soon after sent time ({delta:.2f}s) — skipping.")
-                return "", 204
-        except Exception as e:
-            print(f"⚠️ Invalid timestamp: {stored_timestamp} — {e}")
-            return "", 204
+        sheet_email = sheet.cell(row, email_col).value.strip().lower()
 
-        sheet.update_acell(rowcol_to_a1(row, 10), "Yes")
-        sheet.update_acell(rowcol_to_a1(row, 11), now.strftime("%d-%m-%Y %H:%M:%S"))
-        print(f"✅ SUCCESS: Open? marked 'Yes' in sheet '{sheet_name}', row {row}")
-        return send_file(BytesIO(b""), mimetype="image/png")
+        if sheet_email != email:
+            print(f"⚠️ Email mismatch: {sheet_email} vs {email}")
+            return ('', 204)
+
+        # Optional: prevent proxy triggers if needed
+        if is_gmail_proxy:
+            print(f"📩 Proxy hit → sheet={sheet_name}, row={row}, email={email}, UA={ua}")
+            # You can skip or allow proxies here depending on your logic
+            # return ('', 204)  # If you want to block proxy hits completely
+            # continue to allow real users who click "Show images"
+        
+        # Update only if not already opened
+        open_status = sheet.cell(row, open_col).value
+        if open_status.strip().lower() != 'yes':
+            now = datetime.datetime.now(IST).strftime("%d/%m/%Y %I:%M:%S %p")
+            sheet.update_cell(row, open_col, 'Yes')
+            sheet.update_cell(row, timestamp_col, now)
+            print(f"✅ SUCCESS: Open? marked 'Yes' in sheet '{sheet_name}', row {row}")
+        else:
+            print(f"ℹ️ Already marked open for row {row}, skipping update")
+
+        return ('', 200)
 
     except Exception as e:
-        print("❌ ERROR in /track:", e)
-        return "", 500
+        print(f"❌ Error processing row {row}: {e}")
+        return make_response('Internal error', 500)
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+@app.route('/')
+def root():
+    return 'Tracking pixel service is running.'
+
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=5000)
