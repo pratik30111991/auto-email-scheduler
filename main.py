@@ -12,6 +12,7 @@ INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
+MAX_DELAY_MINUTES = 15  # ⏰ DO NOT SEND if mail is more than 15 minutes late
 
 # ✅ Write credentials file from env
 with open(JSON_FILE, "w") as f:
@@ -41,7 +42,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     msg["To"] = recipient
     try:
         context = ssl.create_default_context()
-        with smtpllib.SMTP_SSL(smtp_server, port, context=context) as server:
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
@@ -79,18 +80,11 @@ for domain in domain_configs:
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
+        status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        # ✅ Directly check Status from live cell
-        try:
-            status_cell = subsheet.cell(i, 8).value  # Column H = Status
-            if status_cell and status_cell.strip().lower() in [
-                "mail sent successfully", "failed to send", "skipped: invalid date format"
-            ]:
-                print(f"✅ Row {i} skipped — already processed (Status: '{status_cell}')")
-                continue
-        except Exception as e:
-            print(f"⚠️ Could not read Status cell for row {i}: {e}")
+        if status not in ["", "pending"]:
+            continue
 
         if not name or not email:
             updates.append((i, 8, "Failed to Send"))
@@ -117,8 +111,17 @@ for domain in domain_configs:
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
+        # ✅ Future check
         if now < schedule_dt:
             print(f"⏳ SKIP Row {i} — Scheduled for future: now={now}, schedule={schedule_dt}")
+            continue
+
+        # ✅ Delay check — SKIP if more than MAX_DELAY_MINUTES late
+        delay_minutes = (now - schedule_dt).total_seconds() / 60
+        if delay_minutes > MAX_DELAY_MINUTES:
+            print(f"🚫 SKIP Row {i} — Schedule expired by {delay_minutes:.1f} minutes")
+            updates.append((i, 8, "Skipped: Schedule Expired"))
+            updates.append((i, 9, timestamp))
             continue
 
         subject = row.get("Subject", "").strip()
