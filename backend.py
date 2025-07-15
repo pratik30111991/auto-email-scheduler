@@ -11,6 +11,7 @@ SCOPES = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/a
 CREDS_FILE = 'credentials.json'
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 
+# Auth + Spreadsheet
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
 client = gspread.authorize(creds)
 spreadsheet = client.open_by_key(SPREADSHEET_ID)
@@ -27,6 +28,7 @@ def track_email_open():
     now = datetime.datetime.now(IST)
 
     if not sheet_name or not row or not email_param:
+        print("[❌ MISSING PARAMS]", sheet_name, row, email_param)
         return '', 204
 
     if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
@@ -38,44 +40,47 @@ def track_email_open():
         row = int(row)
 
         sheet_email = worksheet.cell(row, 3).value  # Column C = Email
-        if not sheet_email or sheet_email.strip().lower() != email_param:
-            print(f"[SKIP] Email mismatch at row {row}: sheet={sheet_email}, param={email_param}")
+        if not sheet_email:
+            print(f"[SKIP] Empty email in row {row}")
+            return '', 204
+
+        sheet_email = sheet_email.strip().lower()
+        if sheet_email != email_param:
+            print(f"[SKIP] Email mismatch at row {row}: sheet='{sheet_email}' vs param='{email_param}'")
             return '', 204
 
         open_status = worksheet.cell(row, 10).value  # Column J = Open?
         if open_status and open_status.strip().lower() == "yes":
+            print(f"[ALREADY OPENED] Row {row}")
             return '', 204
 
         send_time_str = worksheet.cell(row, 9).value  # Column I = Timestamp
-        allow_update = True
-
-        if send_time_str:
-            try:
-                send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
-                delay = (now - send_time).total_seconds()
-                if delay < 10:
-                    print(f"[IGNORED] Delay only {delay:.1f}s for {email_param} — suspicious")
-                    allow_update = False
-            except Exception as e:
-                print(f"[WARN] Invalid send timestamp for row {row}: {e}")
-                allow_update = False
-        else:
+        if not send_time_str:
             print(f"[SKIP] No timestamp in row {row}")
-            allow_update = False
+            return '', 204
 
-        if allow_update:
-            worksheet.update_cell(row, 10, "Yes")
-            worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
-            print(f"[✅ UPDATED] Open tracked for {email_param} (row {row})")
-        else:
-            print(f"[SKIPPED] Valid request but skipped update for {email_param} (row {row})")
+        try:
+            send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
+            delay = (now - send_time).total_seconds()
+            if delay < 10:
+                print(f"[IGNORED] Only {delay:.1f}s since sent for {email_param} — skipping as possible proxy preload")
+                return '', 204
+        except Exception as e:
+            print(f"[WARN] Invalid timestamp in row {row}: {send_time_str} ({e})")
+            return '', 204
+
+        # ✅ Update Open? and Timestamp
+        worksheet.update_cell(row, 10, "Yes")
+        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
+        print(f"[✅ MARKED OPEN] Row {row} for {email_param}")
 
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"[❌ ERROR] Tracking error for {email_param}: {e}")
         return make_response('Internal Server Error', 500)
 
     return '', 204
 
+
 @app.route('/')
 def home():
-    return '✅ Tracking backend is live.'
+    return '✅ Email tracking backend is live (Gunicorn expected).'
