@@ -30,7 +30,8 @@ jobs:
           SMTP_INFO: ${{ secrets.SMTP_INFO }}
           SMTP_SALES: ${{ secrets.SMTP_SALES }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
-          TRACKING_BACKEND_URL: https://email-tracker-3ce5.onrender.com
+          TRACKING_BACKEND_URL: https://auto-email-scheduler.onrender.com
+
         run: |
           echo "$GOOGLE_JSON" > credentials.json
           python main.py
