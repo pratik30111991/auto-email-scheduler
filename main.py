@@ -13,9 +13,11 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
+# ✅ Write credentials file from env
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
+# ✅ Setup Google Sheets client
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
@@ -39,7 +41,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     msg["To"] = recipient
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+        with smtpllib.SMTP_SSL(smtp_server, port, context=context) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient, msg.as_string())
         imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
@@ -77,13 +79,18 @@ for domain in domain_configs:
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
-        raw_status = row.get("Status", "").strip()
-        status = raw_status.lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        if status in ["mail sent successfully", "failed to send", "skipped: invalid date format"]:
-            print(f"✅ Row {i} skipped — already processed (Status: '{raw_status}')")
-            continue
+        # ✅ Directly check Status from live cell
+        try:
+            status_cell = subsheet.cell(i, 8).value  # Column H = Status
+            if status_cell and status_cell.strip().lower() in [
+                "mail sent successfully", "failed to send", "skipped: invalid date format"
+            ]:
+                print(f"✅ Row {i} skipped — already processed (Status: '{status_cell}')")
+                continue
+        except Exception as e:
+            print(f"⚠️ Could not read Status cell for row {i}: {e}")
 
         if not name or not email:
             updates.append((i, 8, "Failed to Send"))
@@ -98,8 +105,7 @@ for domain in domain_configs:
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
             try:
-                schedule_dt = datetime.strptime(schedule, fmt)
-                schedule_dt = INDIA_TZ.localize(schedule_dt).replace(second=0, microsecond=0)
+                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt)).replace(second=0, microsecond=0)
                 parsed = True
                 break
             except:
@@ -112,7 +118,7 @@ for domain in domain_configs:
             continue
 
         if now < schedule_dt:
-            print(f"⏳ Row {i} skipped — future schedule: {schedule_dt}")
+            print(f"⏳ SKIP Row {i} — Scheduled for future: now={now}, schedule={schedule_dt}")
             continue
 
         subject = row.get("Subject", "").strip()
