@@ -23,6 +23,14 @@ sheet = client.open_by_key(SPREADSHEET_ID)
 domain_sheet = sheet.worksheet("Domain Details")
 domain_configs = domain_sheet.get_all_records()
 
+key_map = {
+    "Dilshad_Mails": "SMTP_DILSHAD",
+    "Nana_Mails": "SMTP_NANA",
+    "Gaurav_Mails": "SMTP_GAURAV",
+    "Info_Mails": "SMTP_INFO",
+    "Sales_Mails": "SMTP_SALES"
+}
+
 def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
     msg = MIMEText(body, "html")
     msg["Subject"] = subject.strip().replace("\n", " ")
@@ -41,14 +49,6 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
     except Exception as e:
         print("❌ Email sending failed:", e)
         return False
-
-key_map = {
-    "Dilshad_Mails": "SMTP_DILSHAD",
-    "Nana_Mails": "SMTP_NANA",
-    "Gaurav_Mails": "SMTP_GAURAV",
-    "Info_Mails": "SMTP_INFO",
-    "Sales_Mails": "SMTP_SALES"
-}
 
 for domain in domain_configs:
     sub_sheet_name = domain["SubSheet Name"]
@@ -69,15 +69,15 @@ for domain in domain_configs:
         print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
+    now = datetime.now(INDIA_TZ).replace(second=0, microsecond=0)
+    timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
     updates = []
+
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
         email = row.get("Email ID", "").strip()
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
-
-        now = datetime.now(INDIA_TZ).replace(second=0, microsecond=0)
-        timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
 
         if status not in ["", "pending"]:
             continue
