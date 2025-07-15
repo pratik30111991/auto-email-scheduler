@@ -80,7 +80,7 @@ for domain in domain_configs:
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        if status not in ["", "pending"]:
+        if status in ["mail sent successfully", "failed to send", "skipped: invalid date format"]:
             continue
 
         if not name or not email:
