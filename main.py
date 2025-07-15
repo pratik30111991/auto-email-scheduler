@@ -1,6 +1,4 @@
-# ========================
-# ✅ FINAL main.py
-# ========================
+# main.py
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -9,13 +7,13 @@ from datetime import datetime
 import pytz
 import time
 import os
+from gspread.utils import rowcol_to_a1
 
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-# Restore credentials file
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -72,9 +70,10 @@ for domain in domain_configs:
         print(f"⚠️ Could not access subsheet '{sub_sheet_name}': {e}")
         continue
 
+    updates = []
     for i, row in enumerate(rows, start=2):
         name = row.get("Name", "").strip()
-        email = row.get("Email ID", "").strip().lower()
+        email = row.get("Email ID", "").strip()
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
@@ -84,17 +83,15 @@ for domain in domain_configs:
         if status not in ["", "pending"]:
             continue
 
-        if not schedule:
-            subsheet.update_cell(i, 8, "Failed to Send")
-            subsheet.update_cell(i, 9, timestamp)
-            print(f"❌ Row {i} skipped — no schedule time.")
-            continue
-
         if not name or not email:
-            subsheet.update_cell(i, 8, "Failed to Send")
-            subsheet.update_cell(i, 9, timestamp)
+            updates.append((i, 8, "Failed to Send"))
+            updates.append((i, 9, timestamp))
             print(f"⛔ Row {i} skipped — missing Name/Email.")
             continue
+
+        if not schedule:
+            print(f"❌ Row {i} skipped — no schedule time.")
+            continue  # ⚠️ No update if schedule is empty
 
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
@@ -106,8 +103,8 @@ for domain in domain_configs:
                 continue
 
         if not parsed:
-            subsheet.update_cell(i, 8, "Failed to Send")
-            subsheet.update_cell(i, 9, timestamp)
+            updates.append((i, 8, "Skipped: Invalid Date Format"))
+            updates.append((i, 9, timestamp))
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
@@ -128,7 +125,15 @@ for domain in domain_configs:
         time.sleep(1)
 
         status_text = "Mail Sent Successfully" if success else "Failed to Send"
-        subsheet.update_cell(i, 8, status_text)
-        subsheet.update_cell(i, 9, timestamp)
+        updates.append((i, 8, status_text))
+        updates.append((i, 9, timestamp))
         print(f"📤 Row {i}: {status_text}")
         time.sleep(1)
+
+    # Do all updates after loop
+    for row, col, val in updates:
+        try:
+            subsheet.update_acell(rowcol_to_a1(row, col), val)
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"❌ Update error row {row}, col {col}: {e}")
