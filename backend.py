@@ -29,7 +29,6 @@ def track_email_open():
     if not sheet_name or not row or not email_param:
         return '', 204
 
-    # BLOCK: Google Proxy preloading
     if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
         print(f"[IGNORED: PROXY] {email_param} ({user_agent})")
         return '', 204
@@ -54,7 +53,7 @@ def track_email_open():
             try:
                 send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
                 delay = (now - send_time).total_seconds()
-                if delay < 10:  # Delay is less than 10 seconds
+                if delay < 10:
                     print(f"[IGNORED] Delay only {delay:.1f}s for {email_param} — suspicious")
                     allow_update = False
             except Exception as e:
