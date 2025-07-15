@@ -13,14 +13,13 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 IST = pytz.timezone("Asia/Kolkata")
 
 def get_spreadsheet():
-    # ✅ Create credentials.json from env if not present
     if not os.path.exists(CREDS_FILE):
         google_json = os.environ.get("GOOGLE_JSON", "")
         if not google_json.strip():
             raise Exception("❌ GOOGLE_JSON not found in environment.")
         with open(CREDS_FILE, "w") as f:
             f.write(google_json)
-    
+
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
     client = gspread.authorize(creds)
     return client.open_by_key(SPREADSHEET_ID)
@@ -48,13 +47,8 @@ def track_email_open():
         row = int(row)
 
         sheet_email = worksheet.cell(row, 3).value  # Column C = Email
-        if not sheet_email:
-            print(f"[SKIP] Empty email in row {row}")
-            return '', 204
-
-        sheet_email = sheet_email.strip().lower()
-        if sheet_email != email_param:
-            print(f"[SKIP] Email mismatch at row {row}: sheet='{sheet_email}' vs param='{email_param}'")
+        if not sheet_email or sheet_email.strip().lower() != email_param:
+            print(f"[SKIP] Email mismatch or empty at row {row}")
             return '', 204
 
         open_status = worksheet.cell(row, 10).value  # Column J = Open?
@@ -68,16 +62,15 @@ def track_email_open():
             return '', 204
 
         try:
-            send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
+            send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S").replace(tzinfo=IST)
             delay = (now - send_time).total_seconds()
             if delay < 10:
-                print(f"[IGNORED] Only {delay:.1f}s since sent for {email_param} — skipping as possible proxy preload")
+                print(f"[IGNORED] Only {delay:.1f}s since sent for {email_param} — skipping as proxy preload")
                 return '', 204
         except Exception as e:
             print(f"[WARN] Invalid timestamp in row {row}: {send_time_str} ({e})")
             return '', 204
 
-        # ✅ Update Open? and Timestamp
         worksheet.update_cell(row, 10, "Yes")
         worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
         print(f"[✅ MARKED OPEN] Row {row} for {email_param}")
