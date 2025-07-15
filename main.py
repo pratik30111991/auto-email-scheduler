@@ -91,7 +91,7 @@ for domain in domain_configs:
 
         if not schedule:
             print(f"❌ Row {i} skipped — no schedule time.")
-            continue  # ⚠️ No update if schedule is empty
+            continue  # Do not update anything if schedule is blank
 
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
@@ -130,7 +130,6 @@ for domain in domain_configs:
         print(f"📤 Row {i}: {status_text}")
         time.sleep(1)
 
-    # Do all updates after loop
     for row, col, val in updates:
         try:
             subsheet.update_acell(rowcol_to_a1(row, col), val)
