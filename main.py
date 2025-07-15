@@ -1,3 +1,4 @@
+# ✅ FINAL UPDATED main.py
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -40,7 +41,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         imap.logout()
         return True
     except Exception as e:
-        print("❌ Email sending failed:", e)
+        print("\u274c Email sending failed:", e)
         return False
 
 key_map = {
@@ -60,7 +61,7 @@ for domain in domain_configs:
     password = os.environ.get(key_map.get(sub_sheet_name))
 
     if not password:
-        print(f"❌ No password found for {sub_sheet_name}")
+        print(f"\u274c No password found for {sub_sheet_name}")
         continue
 
     try:
@@ -91,7 +92,7 @@ for domain in domain_configs:
 
         if not schedule:
             print(f"ℹ️ Row {i} skipped — no schedule time.")
-            continue  # clean skip for blank
+            continue
 
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
@@ -108,10 +109,12 @@ for domain in domain_configs:
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M:%S')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M:%S')}")
-        if now.replace(second=0) != schedule_dt.replace(second=0):
-            print(f"⏳ SKIP Row {i} — Not exact time match.")
+        diff_seconds = abs((now - schedule_dt).total_seconds())
+        if diff_seconds > 60:
+            print(f"⏳ SKIP Row {i} — Time mismatch by {diff_seconds:.1f}s.")
             continue
+
+        print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M:%S')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M:%S')}")
 
         subject = row.get("Subject", "").strip()
         message = row.get("Message", "")
