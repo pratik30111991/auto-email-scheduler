@@ -30,7 +30,7 @@ def track_email_open():
     if not sheet_name or not row or not email_param:
         return '', 204
 
-    # Block known Google Proxy hits
+    # Block Gmail and Google Proxy preloaders
     if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
         print(f"[IGNORED] Proxy hit by {email_param} (User-Agent: {user_agent})")
         return '', 204
@@ -38,26 +38,40 @@ def track_email_open():
     try:
         worksheet = spreadsheet.worksheet(sheet_name)
         row = int(row)
-        open_status = worksheet.cell(row, 10).value  # Column J = "Open?"
-        if open_status.strip().lower() == "yes":
+
+        # Verify email matches the actual row's email
+        email_sheet = worksheet.cell(row, 3).value  # Column C = Email
+        if not email_sheet or email_sheet.strip().lower() != email_param:
+            print(f"[SKIP] Email mismatch at row {row}: sheet={email_sheet}, param={email_param}")
             return '', 204
 
-        # Optional: Only allow after 60 seconds to block proxy preload
-        send_time_str = worksheet.cell(row, 9).value  # Column I = "Timestamp"
-        try:
-            send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
-            if (now - send_time).total_seconds() < 60:
-                print(f"[IGNORED] Too soon after sending for {email_param}")
-                return '', 204
-        except Exception as e:
-            print(f"[WARN] Could not parse send time: {e}")
+        # Already marked open
+        open_status = worksheet.cell(row, 10).value  # Column J = "Open?"
+        if open_status and open_status.strip().lower() == "yes":
+            return '', 204
 
-        worksheet.update_cell(row, 10, "Yes")
-        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
-        print(f"[UPDATED] Open? marked Yes for {email_param} in row {row}")
+        # Check delay after send timestamp (Column I)
+        send_time_str = worksheet.cell(row, 9).value  # Column I = "Timestamp"
+        if send_time_str:
+            try:
+                send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S")
+                if (now - send_time).total_seconds() < 60:
+                    print(f"[IGNORED] Too soon for {email_param} (row {row})")
+                    return '', 204
+            except Exception as e:
+                print(f"[WARN] Timestamp parse failed for row {row}: {e}")
+                return '', 204
+        else:
+            print(f"[SKIP] No send timestamp in row {row}")
+            return '', 204
+
+        # Mark as opened
+        worksheet.update_cell(row, 10, "Yes")  # Column J = "Open?"
+        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))  # Column K = Open Timestamp
+        print(f"[UPDATED] Marked Open for {email_param} (row {row})")
 
     except Exception as e:
-        print(f"❌ Error in tracking: {e}")
+        print(f"❌ ERROR: {e}")
         return make_response('Internal Server Error', 500)
 
     return '', 204
