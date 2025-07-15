@@ -1,4 +1,3 @@
-# ✅ FINAL UPDATED main.py
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import smtplib, ssl, imaplib
@@ -14,7 +13,6 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-# Load credentials.json from env
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
@@ -41,7 +39,7 @@ def send_email(smtp_server, port, sender_email, password, recipient, subject, bo
         imap.logout()
         return True
     except Exception as e:
-        print("\u274c Email sending failed:", e)
+        print("❌ Email sending failed:", e)
         return False
 
 key_map = {
@@ -61,7 +59,7 @@ for domain in domain_configs:
     password = os.environ.get(key_map.get(sub_sheet_name))
 
     if not password:
-        print(f"\u274c No password found for {sub_sheet_name}")
+        print(f"❌ No password found for {sub_sheet_name}")
         continue
 
     try:
@@ -78,7 +76,7 @@ for domain in domain_configs:
         status = row.get("Status", "").strip().lower()
         schedule = row.get("Schedule Date & Time", "").strip()
 
-        now = datetime.now(INDIA_TZ)
+        now = datetime.now(INDIA_TZ).replace(second=0, microsecond=0)
         timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
 
         if status not in ["", "pending"]:
@@ -97,7 +95,7 @@ for domain in domain_configs:
         parsed = False
         for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
             try:
-                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt))
+                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt)).replace(second=0, microsecond=0)
                 parsed = True
                 break
             except:
@@ -109,12 +107,9 @@ for domain in domain_configs:
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        diff_seconds = abs((now - schedule_dt).total_seconds())
-        if diff_seconds > 60:
-            print(f"⏳ SKIP Row {i} — Time mismatch by {diff_seconds:.1f}s.")
+        if now != schedule_dt:
+            print(f"⏳ SKIP Row {i} — Time not matched: now={now}, schedule={schedule_dt}")
             continue
-
-        print(f"🕒 TIME CHECK Row {i}: now = {now.strftime('%d/%m/%Y %H:%M:%S')}, scheduled = {schedule_dt.strftime('%d/%m/%Y %H:%M:%S')}")
 
         subject = row.get("Subject", "").strip()
         message = row.get("Message", "")
