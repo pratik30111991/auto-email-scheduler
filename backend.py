@@ -29,50 +29,46 @@ def normalize_email(email):
     return email.strip().lower()
 
 @app.route('/track', methods=['GET'])
-def track():
-    sheet_name = request.args.get('sheet')
+def track_email_open():
+    sheet = request.args.get('sheet')
     row = request.args.get('row')
-    email = request.args.get('email')
+    email_param = request.args.get('email', '').strip().lower()
 
-    if not (sheet_name and row and email):
-        return make_response('Missing parameters', 400)
+    user_agent = request.headers.get('User-Agent', '')
+    ip = request.remote_addr
+    now = datetime.datetime.now()
 
-    row = int(row)
-    email = normalize_email(email)
+    # Only allow update if:
+    # 1. Valid email
+    # 2. Not a bot or Google Proxy
+    # 3. More than 45 seconds after email was sent (to skip preloading)
+    if not sheet or not row or not email_param:
+        return '', 204
 
-    ua = request.headers.get('User-Agent', '')
-    is_gmail_proxy = is_proxy(ua)
+    if "googleimageproxy" in user_agent.lower() or "google" in ip:
+        print(f"[IGNORED] Google proxy hit from {ip}")
+        return '', 204
 
-    # Get sheet
+    sheet = SHEET_CLIENT.open(SHEET_NAME).worksheet(sheet)
+    row_index = int(row)
+    current_status = sheet.cell(row_index, COLUMN_MAP['Open?']).value
+
+    if current_status.strip().upper() == 'YES':
+        return '', 204
+
+    # Optional: Delay check logic (e.g. wait at least 60 seconds after sending)
+    send_time_str = sheet.cell(row_index, COLUMN_MAP['Last Sent At']).value
     try:
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
-    except Exception as e:
-        print(f"❌ Error: Unable to open sheet: {e}")
-        return make_response('Sheet error', 500)
+        send_time = datetime.datetime.strptime(send_time_str, "%d/%m/%Y %H:%M:%S")
+        if (now - send_time).total_seconds() < 60:
+            print(f"[IGNORED] Too soon after send: {email_param}")
+            return '', 204
+    except:
+        pass
 
-    # Read target row data
-    try:
-        row_data = sheet.row_values(row)
-        if len(row_data) < 1:
-            print(f"⚠️ Empty row {row} in sheet {sheet_name}")
-            return ('', 204)
-
-        header = sheet.row_values(1)
-        col_map = {col.strip().lower(): idx+1 for idx, col in enumerate(header)}
-
-        email_col = col_map.get("email")
-        open_col = col_map.get("open?")
-        timestamp_col = col_map.get("open timestamp")
-
-        if not (email_col and open_col and timestamp_col):
-            print("⚠️ Required columns missing")
-            return ('', 204)
-
-        sheet_email = sheet.cell(row, email_col).value.strip().lower()
-
-        if sheet_email != email:
-            print(f"⚠️ Email mismatch: {sheet_email} vs {email}")
-            return ('', 204)
+    print(f"[OPEN] Row {row} marked opened by {email_param}")
+    sheet.update_cell(row_index, COLUMN_MAP['Open?'], 'Yes')
+    return '', 204
 
         # Optional: prevent proxy triggers if needed
         if is_gmail_proxy:
