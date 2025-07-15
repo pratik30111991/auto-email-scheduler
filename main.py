@@ -13,11 +13,9 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
 
-# ✅ Write credentials file from env
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
-# ✅ Setup Google Sheets client
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
@@ -110,7 +108,6 @@ for domain in domain_configs:
             print(f"❌ Row {i} skipped — invalid date format: {schedule}")
             continue
 
-        # ✅ Fix: Allow sending if now >= schedule_dt
         if now < schedule_dt:
             print(f"⏳ SKIP Row {i} — Scheduled for future: now={now}, schedule={schedule_dt}")
             continue
