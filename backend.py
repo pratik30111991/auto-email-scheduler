@@ -1,92 +1,75 @@
-from flask import Flask, request, send_file, make_response
+from flask import Flask, request
 import gspread
-import io
 from oauth2client.service_account import ServiceAccountCredentials
-import os
-import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
+import os
+from gspread.utils import rowcol_to_a1
 
 app = Flask(__name__)
-SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-JSON_FILE = "credentials.json"
-EMAIL_COL_INDEX = 3
-TIMESTAMP_COL_INDEX = 9  # 'Timestamp'
-OPEN_COL_INDEX = 10      # 'Open?'
 
 INDIA_TZ = pytz.timezone("Asia/Kolkata")
+SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
+JSON_FILE = "credentials.json"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Write credentials if not already written (safe for Render)
+if not os.path.exists(JSON_FILE):
+    with open(JSON_FILE, "w") as f:
+        f.write(os.environ["GOOGLE_JSON"])
 
-def send_pixel():
-    pixel = io.BytesIO(
-        b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!'
-        b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
-    )
-    response = make_response(send_file(pixel, mimetype='image/gif'))
-    response.headers['Content-Disposition'] = 'inline; filename="track.gif"'
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+client = gspread.authorize(creds)
 
 @app.route("/track")
 def track():
-    sheet_name = request.args.get("sheet")
-    row = request.args.get("row")
-    email_param = request.args.get("email", "").strip().lower()
-    user_agent = request.headers.get("User-Agent", "").lower()
-
-    logger.info(f"📩 Tracking pixel hit → sheet={sheet_name}, row={row}, email={email_param}, UA={user_agent}")
-
-    # Basic bot filtering
-    if any(k in user_agent for k in ["bot", "crawler", "curl", "wget", "python", "uptime"]):
-        logger.warning(f"🤖 Ignored bot hit on tracking pixel. UA: {user_agent}")
-        return send_pixel()
-
     try:
-        with open(JSON_FILE, "w") as f:
-            f.write(os.environ["GOOGLE_JSON"])
+        sheet_name = request.args.get("sheet", "").strip()
+        row = int(request.args.get("row", "0"))
+        email_param = request.args.get("email", "").strip().lower()
+        ua = request.headers.get("User-Agent", "").lower()
 
-        creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-            "https://www.googleapis.com/auth/spreadsheets"
-        ])
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(SPREADSHEET_ID)
-        ws = sheet.worksheet(sheet_name)
+        if not sheet_name or not row or not email_param:
+            return "", 400
 
-        actual_email = ws.cell(int(row), EMAIL_COL_INDEX).value.strip().lower()
-        if actual_email != email_param:
-            logger.warning(f"⛔ Email mismatch: sheet={actual_email}, pixel={email_param} — skipping Open? update")
-            return send_pixel()
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
+        values = sheet.row_values(row)
 
-        # Check sent timestamp to enforce minimum delay
-        timestamp_str = ws.cell(int(row), TIMESTAMP_COL_INDEX).value
-        if not timestamp_str:
-            logger.warning("⏱️ No timestamp found — skipping Open? update")
-            return send_pixel()
+        if len(values) < 9:
+            print(f"⚠️ Row {row} too short — skipping.")
+            return "", 204
 
+        stored_email = values[1].strip().lower()  # Col B = Email
+        stored_status = values[7].strip().lower()  # Col H = Status
+        stored_timestamp = values[8].strip()       # Col I = Timestamp
+
+        print(f"📩 Tracking pixel hit → sheet={sheet_name}, row={row}, email={stored_email}, UA={ua}")
+
+        # ✅ Check email match
+        if stored_email != email_param:
+            print(f"⚠️ Email mismatch: {email_param} != {stored_email} — skipping.")
+            return "", 204
+
+        # ✅ Check timestamp delay
         try:
-            sent_time = datetime.strptime(timestamp_str, "%d-%m-%Y %H:%M:%S")
-            sent_time = INDIA_TZ.localize(sent_time)
+            sent_time = INDIA_TZ.localize(datetime.strptime(stored_timestamp, "%d-%m-%Y %H:%M:%S"))
+            now = datetime.now(INDIA_TZ)
+            delta = (now - sent_time).total_seconds()
+            if delta < 5:
+                print(f"⏳ Too soon after sent time ({delta:.2f}s) — skipping.")
+                return "", 204
         except Exception as e:
-            logger.warning(f"⏱️ Timestamp parse failed: {e} — skipping")
-            return send_pixel()
+            print(f"⚠️ Invalid timestamp: {stored_timestamp} — {e}")
+            return "", 204
 
-        now = datetime.now(INDIA_TZ)
-        if (now - sent_time) < timedelta(seconds=15):
-            logger.warning("⏱️ TOO EARLY — possible Gmail preload — skipping")
-            return send_pixel()
+        # ✅ Mark "Open?" as Yes (Col J = col 10)
+        sheet.update_acell(rowcol_to_a1(row, 10), "Yes")
+        print(f"✅ SUCCESS: Open? marked 'Yes' in sheet '{sheet_name}', row {row}")
+        return "", 200
 
-        ws.update_cell(int(row), OPEN_COL_INDEX, "Yes")
-        logger.info(f"✅ SUCCESS: Open? marked 'Yes' in sheet '{sheet_name}', row {row}")
     except Exception as e:
-        logger.error(f"❌ ERROR updating Open? in sheet '{sheet_name}', row {row}: {e}")
-
-    return send_pixel()
+        print("❌ ERROR in /track:", e)
+        return "", 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
