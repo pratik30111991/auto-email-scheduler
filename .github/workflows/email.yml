@@ -1,32 +1,22 @@
 name: Auto Email Sender
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
-
-concurrency:
-  group: email-sender
-  cancel-in-progress: true
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   send_mail:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
+      - uses: actions/checkout@v2
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Run email script
+      - name: Run email sender
         env:
           SMTP_DILSHAD: ${{ secrets.SMTP_DILSHAD }}
           SMTP_NANA: ${{ secrets.SMTP_NANA }}
