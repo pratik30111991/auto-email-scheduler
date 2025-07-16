@@ -10,12 +10,11 @@ SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 IST = pytz.timezone("Asia/Kolkata")
 
 def get_spreadsheet():
-    if not os.path.exists(CREDS_FILE):
-        google_json = os.environ.get("GOOGLE_JSON", "")
-        if not google_json.strip():
-            raise Exception("❌ GOOGLE_JSON not found.")
-        with open(CREDS_FILE, "w") as f:
-            f.write(google_json)
+    google_json = os.environ.get("GOOGLE_JSON", "")
+    if not google_json.strip():
+        raise Exception("❌ GOOGLE_JSON not found.")
+    with open(CREDS_FILE, "w") as f:
+        f.write(google_json)
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
     client = gspread.authorize(creds)
     return client.open_by_key(SPREADSHEET_ID)
