@@ -3,16 +3,16 @@ name: Auto Email Sender
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
 
 concurrency:
-  group: auto-email-sender
+  group: email-sender
   cancel-in-progress: true
 
 jobs:
   send_mail:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Cancel job if it hangs
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -24,8 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run email script
         env:
