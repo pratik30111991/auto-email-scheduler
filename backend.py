@@ -6,81 +6,70 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
-
-SCOPES = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-CREDS_FILE = 'credentials.json'
+CREDS_FILE = "credentials.json"
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
+SCOPES = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 IST = pytz.timezone("Asia/Kolkata")
 
 def get_spreadsheet():
     if not os.path.exists(CREDS_FILE):
-        google_json = os.environ.get("GOOGLE_JSON", "")
-        if not google_json.strip():
-            raise Exception("❌ GOOGLE_JSON not found in environment.")
+        creds_json = os.environ.get("GOOGLE_JSON", "")
+        if not creds_json.strip():
+            raise Exception("❌ GOOGLE_JSON is empty")
         with open(CREDS_FILE, "w") as f:
-            f.write(google_json)
-
+            f.write(creds_json)
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPES)
     client = gspread.authorize(creds)
     return client.open_by_key(SPREADSHEET_ID)
 
-@app.route('/track', methods=['GET'])
-def track_email_open():
+@app.route("/track", methods=["GET"])
+def track():
     try:
-        spreadsheet = get_spreadsheet()
-        sheet_name = request.args.get('sheet')
-        row = request.args.get('row')
-        email_param = request.args.get('email', '').strip().lower()
-
-        user_agent = request.headers.get('User-Agent', '')
+        sheet_name = request.args.get("sheet")
+        row = int(request.args.get("row", "0"))
+        email = request.args.get("email", "").strip().lower()
+        ua = request.headers.get("User-Agent", "").lower()
         now = datetime.datetime.now(IST)
 
-        if not sheet_name or not row or not email_param:
-            print("[❌ MISSING PARAMS]", sheet_name, row, email_param)
-            return '', 204
+        if not sheet_name or not row or not email:
+            print("[❌ Missing params]", sheet_name, row, email)
+            return "", 204
 
-        if 'googleimageproxy' in user_agent.lower() or 'googleusercontent' in user_agent.lower():
-            print(f"[IGNORED: PROXY] {email_param} ({user_agent})")
-            return '', 204
+        if "googleimageproxy" in ua or "googleusercontent" in ua:
+            print(f"[SKIP: PROXY] {email}")
+            return "", 204
 
-        worksheet = spreadsheet.worksheet(sheet_name)
-        row = int(row)
+        sheet = get_spreadsheet()
+        ws = sheet.worksheet(sheet_name)
+        sheet_email = ws.cell(row, 3).value or ""
+        if sheet_email.strip().lower() != email:
+            print(f"[SKIP: Email mismatch] Row {row}: {sheet_email} vs {email}")
+            return "", 204
 
-        sheet_email = worksheet.cell(row, 3).value  # Column C = Email
-        if not sheet_email or sheet_email.strip().lower() != email_param:
-            print(f"[SKIP] Email mismatch or empty at row {row}")
-            return '', 204
-
-        open_status = worksheet.cell(row, 10).value  # Column J = Open?
+        open_status = ws.cell(row, 10).value
         if open_status and open_status.strip().lower() == "yes":
             print(f"[ALREADY OPENED] Row {row}")
-            return '', 204
+            return "", 204
 
-        send_time_str = worksheet.cell(row, 9).value  # Column I = Timestamp
-        if not send_time_str:
-            print(f"[SKIP] No timestamp in row {row}")
-            return '', 204
-
+        sent_time_str = ws.cell(row, 9).value or ""
         try:
-            send_time = datetime.datetime.strptime(send_time_str, "%d-%m-%Y %H:%M:%S").replace(tzinfo=IST)
-            delay = (now - send_time).total_seconds()
-            if delay < 10:
-                print(f"[IGNORED] Only {delay:.1f}s since sent for {email_param} — skipping as proxy preload")
-                return '', 204
-        except Exception as e:
-            print(f"[WARN] Invalid timestamp in row {row}: {send_time_str} ({e})")
-            return '', 204
+            sent_time = datetime.datetime.strptime(sent_time_str, "%d-%m-%Y %H:%M:%S").replace(tzinfo=IST)
+            if (now - sent_time).total_seconds() < 10:
+                print(f"[TOO EARLY] Delay <10s — {email}")
+                return "", 204
+        except:
+            print(f"[WARN] Bad timestamp in row {row}: {sent_time_str}")
+            return "", 204
 
-        worksheet.update_cell(row, 10, "Yes")
-        worksheet.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
-        print(f"[✅ MARKED OPEN] Row {row} for {email_param}")
-
+        ws.update_cell(row, 10, "Yes")
+        ws.update_cell(row, 11, now.strftime("%d-%m-%Y %H:%M:%S"))
+        print(f"[✅ TRACKED] Row {row} for {email}")
     except Exception as e:
-        print(f"[❌ ERROR] Tracking error: {e}")
-        return make_response('Internal Server Error', 500)
+        print("[❌ Tracking error]", e)
+        return make_response("Error", 500)
 
-    return '', 204
+    return "", 204
 
-@app.route('/')
+@app.route("/")
 def home():
-    return '✅ Email tracking backend is live (Gunicorn expected).'
+    return "✅ Email tracking backend is live"
