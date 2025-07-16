@@ -6,7 +6,7 @@ on:
     - cron: '*/5 * * * *'   # Runs every 5 minutes
 
 concurrency:
-  group: email-sender-group
+  group: ${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
