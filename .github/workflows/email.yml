@@ -1,13 +1,18 @@
 name: Auto Email Sender
 
 on:
-  workflow_dispatch:       # Allows manual or API triggering
+  workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'   # Optional: every 5 minutes (if enabled)
+    - cron: '*/5 * * * *'
+
+concurrency:
+  group: auto-email-sender
+  cancel-in-progress: true
 
 jobs:
   send_mail:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # Cancel job if it hangs
 
     steps:
       - name: Checkout code
@@ -31,7 +36,6 @@ jobs:
           SMTP_SALES: ${{ secrets.SMTP_SALES }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
           TRACKING_BACKEND_URL: https://auto-email-scheduler.onrender.com
-
         run: |
           echo "$GOOGLE_JSON" > credentials.json
           python main.py
