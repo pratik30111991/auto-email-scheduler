@@ -12,11 +12,13 @@ INDIA_TZ = pytz.timezone("Asia/Kolkata")
 SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 JSON_FILE = "credentials.json"
 TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
-MAX_DELAY_MINUTES = 15
+MAX_DELAY_MINUTES = 15  # Do not send if more than 15 min late
 
+# Write credentials from env
 with open(JSON_FILE, "w") as f:
     f.write(os.environ["GOOGLE_JSON"])
 
+# Setup Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
 client = gspread.authorize(creds)
@@ -68,7 +70,7 @@ for domain in domain_configs:
         subsheet = sheet.worksheet(sub_sheet_name)
         rows = subsheet.get_all_records()
     except Exception as e:
-        print(f"⚠️ Can't access subsheet '{sub_sheet_name}': {e}")
+        print(f"⚠️ Can't access '{sub_sheet_name}': {e}")
         continue
 
     now = datetime.now(INDIA_TZ).replace(second=0, microsecond=0)
@@ -83,15 +85,13 @@ for domain in domain_configs:
 
         if status not in ["", "pending"]:
             continue
-
         if not name or not email:
             updates.append((i, 8, "Failed to Send"))
             updates.append((i, 9, timestamp))
-            print(f"⛔ Row {i} skipped — missing name/email")
+            print(f"⛔ Row {i} skipped — missing name/email.")
             continue
-
         if not schedule:
-            print(f"ℹ️ Row {i} skipped — no schedule time")
+            print(f"ℹ️ Row {i} skipped — no schedule time.")
             continue
 
         parsed = False
@@ -106,18 +106,17 @@ for domain in domain_configs:
         if not parsed:
             updates.append((i, 8, "Skipped: Invalid Date Format"))
             updates.append((i, 9, timestamp))
-            print(f"❌ Row {i} — Invalid date format: {schedule}")
             continue
 
         if now < schedule_dt:
-            print(f"⏳ Row {i} — Not reached yet (now={now}, schedule={schedule_dt})")
+            print(f"⏳ SKIP Row {i} — future: {schedule_dt}")
             continue
 
         delay_minutes = (now - schedule_dt).total_seconds() / 60
         if delay_minutes > MAX_DELAY_MINUTES:
+            print(f"🚫 SKIP Row {i} — late by {delay_minutes:.1f} min")
             updates.append((i, 8, "Skipped: Schedule Expired"))
             updates.append((i, 9, timestamp))
-            print(f"🚫 Row {i} — Too late ({delay_minutes:.1f} min)")
             continue
 
         subject = row.get("Subject", "").strip()
@@ -134,7 +133,6 @@ for domain in domain_configs:
         status_text = "Mail Sent Successfully" if success else "Failed to Send"
         updates.append((i, 8, status_text))
         updates.append((i, 9, timestamp))
-        print(f"📤 Row {i}: {status_text}")
         time.sleep(1)
 
     for row, col, val in updates:
@@ -142,4 +140,4 @@ for domain in domain_configs:
             subsheet.update_acell(rowcol_to_a1(row, col), val)
             time.sleep(0.2)
         except Exception as e:
-            print(f"❌ Update failed at row {row}, col {col}: {e}")
+            print(f"❌ Update error at row {row}, col {col}: {e}")
