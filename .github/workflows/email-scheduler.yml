@@ -29,6 +29,7 @@ jobs:
           SMTP_SALES: ${{ secrets.SMTP_SALES }}
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
           TRACKING_BACKEND_URL: https://auto-email-scheduler.onrender.com
+          SHEET_ID: ${{ secrets.SHEET_ID }}       # ← Add this line
         run: |
           echo "$GOOGLE_JSON" > credentials.json
           python main.py
