@@ -1,143 +1,133 @@
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import smtplib, ssl, imaplib
-from email.mime.text import MIMEText
-from datetime import datetime
+import os
+import json
+import base64
 import pytz
 import time
-import os
-from gspread.utils import rowcol_to_a1
+import smtplib
+import imaplib
+import email.utils
+from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-INDIA_TZ = pytz.timezone("Asia/Kolkata")
-SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-JSON_FILE = "credentials.json"
-TRACKING_BASE = os.getenv("TRACKING_BACKEND_URL", "")
-MAX_DELAY_MINUTES = 15  # Do not send if more than 15 min late
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# Write credentials from env
-with open(JSON_FILE, "w") as f:
-    f.write(os.environ["GOOGLE_JSON"])
+# Load credentials
+with open("credentials.json") as f:
+    creds_dict = json.load(f)
 
-# Setup Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SPREADSHEET_ID)
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(credentials)
 
-domain_sheet = sheet.worksheet("Domain Details")
-domain_configs = domain_sheet.get_all_records()
+# Constants
+SPREADSHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
+TIMEZONE = pytz.timezone("Asia/Kolkata")
+TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
 
-key_map = {
-    "Dilshad_Mails": "SMTP_DILSHAD",
-    "Nana_Mails": "SMTP_NANA",
-    "Gaurav_Mails": "SMTP_GAURAV",
-    "Info_Mails": "SMTP_INFO",
-    "Sales_Mails": "SMTP_SALES"
-}
+def get_domain_credentials(domain):
+    smtp_env = f"SMTP_{domain.upper()}"
+    if smtp_env in os.environ:
+        creds = os.environ[smtp_env].split(",")
+        if len(creds) >= 4:
+            return {
+                "email": creds[0],
+                "password": creds[1],
+                "smtp_server": creds[2],
+                "imap_server": creds[3]
+            }
+    return None
 
-def send_email(smtp_server, port, sender_email, password, recipient, subject, body, imap_server=""):
-    msg = MIMEText(body, "html")
-    msg["Subject"] = subject.strip().replace("\n", " ")
-    msg["From"] = f"Unlisted Radar <{sender_email}>"
-    msg["To"] = recipient
+def send_email(smtp_details, sender_name, to_email, subject, html_content, message_id):
+    msg = MIMEMultipart('alternative')
+    msg['From'] = f"{sender_name} <{smtp_details['email']}>"
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg['Message-ID'] = message_id
+    msg['Date'] = email.utils.formatdate(localtime=True)
+
+    msg.attach(MIMEText(html_content, 'html'))
+
+    server = smtplib.SMTP(smtp_details['smtp_server'], 587)
+    server.starttls()
+    server.login(smtp_details['email'], smtp_details['password'])
+    server.sendmail(smtp_details['email'], to_email, msg.as_string())
+    server.quit()
+
+    # Append to Sent folder (IMAP)
+    imap = imaplib.IMAP4_SSL(smtp_details['imap_server'])
+    imap.login(smtp_details['email'], smtp_details['password'])
+    imap.append('Sent', '', imaplib.Time2Internaldate(time.time()), msg.as_bytes())
+    imap.logout()
+
+def process_sheet(sheet_name):
+    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
+    data = sheet.get_all_values()
+    headers = data[0]
+
     try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-            server.login(sender_email, password)
-            server.sendmail(sender_email, recipient, msg.as_string())
-        imap = imaplib.IMAP4_SSL(imap_server or smtp_server)
-        imap.login(sender_email, password)
-        imap.append("Sent", "", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
-        imap.logout()
-        return True
-    except Exception as e:
-        print("❌ Email sending failed:", e)
-        return False
+        idx = lambda col: headers.index(col)
+    except ValueError as e:
+        print(f"❌ Missing required column: {e}")
+        return
 
-for domain in domain_configs:
-    sub_sheet_name = domain["SubSheet Name"]
-    smtp_server = domain["SMTP Server"]
-    imap_server = domain.get("IMAP Server", smtp_server)
-    port = int(domain["Port"])
-    sender_email = domain["Email ID"]
-    password = os.environ.get(key_map.get(sub_sheet_name))
+    for i, row in enumerate(data[1:], start=2):  # Row index starts from 2
+        try:
+            name = row[idx("Name")].strip()
+            email_id = row[idx("Email ID")].strip()
+            subject = row[idx("Subject")].strip()
+            message = row[idx("Message")].strip()
+            schedule_str = row[idx("Schedule Date & Time")].strip()
+            status = row[idx("Status")].strip()
 
-    if not password:
-        print(f"❌ No password for {sub_sheet_name}")
-        continue
-
-    try:
-        subsheet = sheet.worksheet(sub_sheet_name)
-        rows = subsheet.get_all_records()
-    except Exception as e:
-        print(f"⚠️ Can't access '{sub_sheet_name}': {e}")
-        continue
-
-    now = datetime.now(INDIA_TZ).replace(second=0, microsecond=0)
-    timestamp = now.strftime("%d-%m-%Y %H:%M:%S")
-    updates = []
-
-    for i, row in enumerate(rows, start=2):
-        name = row.get("Name", "").strip()
-        email = row.get("Email ID", "").strip()
-        status = row.get("Status", "").strip().lower()
-        schedule = row.get("Schedule Date & Time", "").strip()
-
-        if status not in ["", "pending"]:
-            continue
-        if not name or not email:
-            updates.append((i, 8, "Failed to Send"))
-            updates.append((i, 9, timestamp))
-            print(f"⛔ Row {i} skipped — missing name/email.")
-            continue
-        if not schedule:
-            print(f"ℹ️ Row {i} skipped — no schedule time.")
-            continue
-
-        parsed = False
-        for fmt in ["%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"]:
-            try:
-                schedule_dt = INDIA_TZ.localize(datetime.strptime(schedule, fmt)).replace(second=0, microsecond=0)
-                parsed = True
-                break
-            except:
+            if not name or not email_id:
+                print(f"⛔ Row {i} skipped — missing name/email.")
+                sheet.update_cell(i, idx("Status") + 1, "Failed to Send")
+                sheet.update_cell(i, idx("Timestamp") + 1, datetime.now(TIMEZONE).strftime("%d-%m-%Y %H:%M:%S"))
                 continue
 
-        if not parsed:
-            updates.append((i, 8, "Skipped: Invalid Date Format"))
-            updates.append((i, 9, timestamp))
-            continue
+            if not schedule_str:
+                continue
 
-        if now < schedule_dt:
-            print(f"⏳ SKIP Row {i} — future: {schedule_dt}")
-            continue
+            try:
+                schedule_dt = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
+                schedule_dt = TIMEZONE.localize(schedule_dt)
+            except ValueError:
+                print(f"⚠️ Row {i} skipped — invalid date format: {schedule_str}")
+                continue
 
-        delay_minutes = (now - schedule_dt).total_seconds() / 60
-        if delay_minutes > MAX_DELAY_MINUTES:
-            print(f"🚫 SKIP Row {i} — late by {delay_minutes:.1f} min")
-            updates.append((i, 8, "Skipped: Schedule Expired"))
-            updates.append((i, 9, timestamp))
-            continue
+            if status == "Mail Sent Successfully":
+                continue
 
-        subject = row.get("Subject", "").strip()
-        message = row.get("Message", "")
-        tracking_pixel = (
-            f'<img src="{TRACKING_BASE}/track?sheet={sub_sheet_name}&row={i}&email={email}" '
-            'width="1" height="1" alt="." style="opacity:0;">'
-        )
-        full_body = f"{message}{tracking_pixel}"
+            now = datetime.now(TIMEZONE)
+            if now < schedule_dt:
+                continue
 
-        success = send_email(smtp_server, port, sender_email, password, email, subject, full_body, imap_server)
-        time.sleep(1)
+            # Determine domain and credentials
+            domain_sheet = sheet_name.split("_")[0].upper()
+            smtp_details = get_domain_credentials(domain_sheet)
+            if not smtp_details:
+                print(f"❌ Missing SMTP details for domain {domain_sheet}")
+                continue
 
-        status_text = "Mail Sent Successfully" if success else "Failed to Send"
-        updates.append((i, 8, status_text))
-        updates.append((i, 9, timestamp))
-        time.sleep(1)
+            # Create tracking pixel
+            message_id = email.utils.make_msgid()
+            tracking_url = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={i}&email={email_id}"
+            full_html = f"{message}<img src='{tracking_url}' width='1' height='1' style='display:none;'>"
 
-    for row, col, val in updates:
-        try:
-            subsheet.update_acell(rowcol_to_a1(row, col), val)
-            time.sleep(0.2)
+            send_email(smtp_details, "Unlisted Radar", email_id, subject, full_html, message_id)
+
+            # Update sheet
+            sheet.update_cell(i, idx("Status") + 1, "Mail Sent Successfully")
+            sheet.update_cell(i, idx("Timestamp") + 1, now.strftime("%d-%m-%Y %H:%M:%S"))
+            print(f"✅ Row {i} — Email sent to {email_id}")
+
         except Exception as e:
-            print(f"❌ Update error at row {row}, col {col}: {e}")
+            print(f"❌ Error in row {i}: {e}")
+
+# Sheets to process
+sheet_list = ["Sales_Mails"]
+
+for sheet_name in sheet_list:
+    process_sheet(sheet_name)
