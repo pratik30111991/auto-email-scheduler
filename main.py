@@ -13,6 +13,7 @@ from gspread.utils import rowcol_to_a1
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
 TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
+
 if not GOOGLE_JSON or not SHEET_ID or not TRACKING_BACKEND_URL:
     raise Exception("Missing GOOGLE_JSON, SHEET_ID, or TRACKING_BACKEND_URL")
 
@@ -56,8 +57,10 @@ def send_from_sheet(sheet, row_index, row, headers_map):
     except:
         return  # Invalid date format — skip silently
 
-    if datetime.now(ist) < sched_dt:
-        return  # Not time yet
+    now = datetime.now(ist)
+    if sched_dt < now:
+        print(f"⏩ Skipped past schedule: {email} (Scheduled: {sched_dt}, Now: {now})")
+        return  # Past time — skip this email
 
     sheet_name = sheet.title
     if sheet_name not in domain_map:
@@ -78,7 +81,15 @@ def send_from_sheet(sheet, row_index, row, headers_map):
     msg["Subject"] = subject
 
     tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}"
-    html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
+
+    # Insert pixel before </body> or </html>
+    if "</body>" in message:
+        html = message.replace("</body>", f"<img src='{tracking_pixel}' width='1' height='1' /></body>")
+    elif "</html>" in message:
+        html = message.replace("</html>", f"<img src='{tracking_pixel}' width='1' height='1' /></html>")
+    else:
+        html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
+
     msg.attach(MIMEText(html, "html"))
 
     try:
@@ -86,7 +97,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
             server.login(from_email, smtp_pass)
             server.send_message(msg)
 
-        now_str = datetime.now(ist).strftime("%d-%m-%Y %H:%M:%S")
+        now_str = now.strftime("%d-%m-%Y %H:%M:%S")
         sheet.update_cell(row_index, headers_map["Status"], "Mail Sent Successfully")
         sheet.update_cell(row_index, headers_map["Timestamp"], now_str)
         print(f"✅ Sent: {email} from {from_email} via {smtp_server}")
