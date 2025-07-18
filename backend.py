@@ -1,74 +1,97 @@
-# backend.py
-import os
+import os, json, pytz
+from datetime import datetime
 from flask import Flask, request, Response
 import gspread
-from datetime import datetime
-import pytz
-import json
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 app = Flask(__name__)
 
-# Load service account from environment variable
-google_json = os.environ.get("GOOGLE_JSON")
-if not google_json:
-    raise ValueError("GOOGLE_JSON environment variable not set")
+# Load Google credentials
+creds = json.loads(os.environ['GOOGLE_JSON'])
+gc = gspread.service_account_from_dict(creds)
+SHEET_ID = os.environ['SHEET_ID']
 
-creds_dict = json.loads(google_json)
-gc = gspread.service_account_from_dict(creds_dict)
+def load_domains():
+    sh = gc.open_by_key(SHEET_ID)
+    dd = sh.worksheet("Domain Details").get_all_records()
+    return {
+        r['SubSheet Name'].strip(): {
+            'smtp': r['SMTP Server'],
+            'port': int(r['Port']),
+            'email': r['Email ID'],
+            'pass': r['Password']
+        } for r in dd
+    }
 
-SHEET_ID = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
+@app.route("/send")
+def send_sched():
+    tz = pytz.timezone("Asia/Kolkata")
+    sh = gc.open_by_key(SHEET_ID)
+    domains = load_domains()
+    now = datetime.now(tz)
+    for ws in sh.worksheets():
+        if ws.title == "Domain Details": continue
+        rows = ws.get_all_records()
+        updates = []
+        for idx, row in enumerate(rows, start=2):
+            if row.get('Status','').lower() == 'sent': continue
+            sched = row.get('Schedule Date & Time')
+            if not sched: continue
+            try:
+                st = tz.localize(datetime.strptime(sched, "%d/%m/%Y %H:%M:%S"))
+            except:
+                updates.append({'range': f'H{idx}', 'values': [['Skipped:Invalid Date']]})
+                continue
+            if now < st: continue
+            domain = domains.get(ws.title)
+            if not domain:
+                updates.append({'range': f'H{idx}', 'values': [['Skipped:No Domain Config']]})
+                continue
+            msg = MIMEMultipart("alternative")
+            msg['From'] = f"Unlisted Radar <{domain['email']}>"
+            msg['To'] = row['Email ID']
+            msg['Subject'] = row['Subject']
+            track = f"{os.getenv('TRACKING_BACKEND_URL')}/track?sheet={ws.title}&row={idx}&email={row['Email ID']}"
+            html = f"{row['Message']}<img src='{track}' width='1' height='1' style='display:none;'>"
+            msg.attach(MIMEText(html,'html'))
+            try:
+                with smtplib.SMTP_SSL(domain['smtp'], domain['port']) as s:
+                    s.login(domain['email'], domain['pass'])
+                    s.sendmail(domain['email'], row['Email ID'], msg.as_string())
+                updates.append({'range': f'H{idx}:I{idx}', 'values': [['Sent', now.strftime("%d/%m/%Y %H:%M:%S")]]})
+            except Exception as e:
+                updates.append({'range': f'H{idx}', 'values': [[f"Failed: {e}"]]})
+        if updates:
+            ws.batch_update(updates)
+    return "✅ Emails processed"
+
+@app.route("/track")
+def track():
+    sheet = request.args.get('sheet')
+    row = int(request.args.get('row'))
+    email = request.args.get('email').strip().lower()
+    sh = gc.open_by_key(SHEET_ID)
+    ws = sh.worksheet(sheet)
+    rv = ws.row_values(1)
+    cm = {v.strip(): idx+1 for idx,v in enumerate(rv)}
+    if ws.cell(row, cm['Email ID']).value.strip().lower() != email: return Response(status=204)
+    if ws.cell(row, cm['Open?']).value == 'Yes': return Response(status=204)
+    now = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%d/%m/%Y %H:%M:%S")
+    ws.batch_update([
+        {'range': f"{gspread.utils.rowcol_to_a1(row, cm['Open?'])}", 'values': [['Yes']]},
+        {'range': f"{gspread.utils.rowcol_to_a1(row, cm['Open Timestamp'])}", 'values': [[now]]}
+    ])
+    gif = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00" \
+          b"\xFF\xFF\xFF!\xF9\x04\x01\x00\x00\x00\x00," \
+          b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02" \
+          b"D\x01\x00;"
+    return Response(gif, mimetype='image/gif')
 
 @app.route("/")
-def index():
-    return "📬 Tracker Running"
+def home():
+    return "🚀 Email Scheduler Active"
 
-@app.route("/track", methods=["GET"])
-def track():
-    sheet_name = request.args.get("sheet")
-    row = request.args.get("row")
-    email_param = request.args.get("email")
-
-    if not sheet_name or not row or not email_param:
-        return Response(status=204)
-
-    try:
-        sh = gc.open_by_key(SHEET_ID)
-        worksheet = sh.worksheet(sheet_name)
-        row = int(row)
-
-        row_values = worksheet.row_values(row)
-        headers = worksheet.row_values(1)
-        col_map = {header.strip(): idx + 1 for idx, header in enumerate(headers)}
-
-        open_col = col_map.get("Open?")
-        timestamp_col = col_map.get("Open Timestamp")
-        email_col = col_map.get("Email ID")
-
-        if not open_col or not timestamp_col or not email_col:
-            return Response(status=204)
-
-        email_in_sheet = worksheet.cell(row, email_col).value.strip().lower()
-        if email_in_sheet != email_param.strip().lower():
-            return Response(status=204)
-
-        already_opened = worksheet.cell(row, open_col).value
-        if already_opened == "Yes":
-            return Response(status=204)
-
-        ist_now = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%d/%m/%Y %H:%M:%S")
-        worksheet.update_cell(row, open_col, "Yes")
-        worksheet.update_cell(row, timestamp_col, ist_now)
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return Response(status=500)
-
-    # Return tracking pixel
-    pixel_gif = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00" \
-                b"\xFF\xFF\xFF!\xF9\x04\x01\x00\x00\x00\x00," \
-                b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02" \
-                b"D\x01\x00;"
-    return Response(pixel_gif, mimetype='image/gif')
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__=="__main__":
+    app.run()
