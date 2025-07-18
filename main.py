@@ -1,3 +1,4 @@
+# main.py
 import os
 import json
 import gspread
@@ -10,7 +11,6 @@ import pytz
 
 print("🔧 Debug — SHEET_ID:", os.getenv("SHEET_ID"))
 
-# Load GOOGLE_JSON
 google_json = os.getenv("GOOGLE_JSON")
 if not google_json:
     print("❌ Missing GOOGLE_JSON in environment")
@@ -34,9 +34,21 @@ if not sheet_id:
 try:
     sh = gc.open_by_key(sheet_id)
     worksheet = sh.worksheet("Sales_Mails")
+    domain_sheet = sh.worksheet("Domain Details")
 except Exception as e:
     print("❌ Error loading worksheet:", str(e))
     exit(1)
+
+domain_data = domain_sheet.get_all_records()
+domain_map = {
+    row["SubSheet Name"].strip(): {
+        "smtp_server": row["SMTP Server"],
+        "port": int(row["Port"]),
+        "email": row["Email ID"],
+        "password": row["Password"]
+    }
+    for row in domain_data
+}
 
 rows = worksheet.get_all_records()
 timezone = pytz.timezone("Asia/Kolkata")
@@ -68,43 +80,34 @@ for i, row in enumerate(rows, start=2):
     if now < scheduled_time:
         continue
 
-    smtp_password = None
-    from_email = None
+    sub_sheet_name = "Sales_Mails"
+    creds = domain_map.get(sub_sheet_name)
 
-    if "dilshad" in email.lower():
-        from_email = "dilshad@unlistedradar.in"
-        smtp_password = os.getenv("SMTP_DILSHAD")
-    elif "nana" in email.lower():
-        from_email = "nana@unlistedradar.in"
-        smtp_password = os.getenv("SMTP_NANA")
-    elif "gaurav" in email.lower():
-        from_email = "gaurav@unlistedradar.in"
-        smtp_password = os.getenv("SMTP_GAURAV")
-    elif "info" in email.lower():
-        from_email = "info@unlistedradar.in"
-        smtp_password = os.getenv("SMTP_INFO")
-    else:
-        from_email = "sales@unlistedradar.in"
-        smtp_password = os.getenv("SMTP_SALES")
+    if not creds:
+        worksheet.update_cell(i, 8, "Skipped: SMTP Config Missing")
+        continue
+
+    smtp_server = creds["smtp_server"]
+    smtp_port = creds["port"]
+    from_email = creds["email"]
+    smtp_password = creds["password"]
 
     if not smtp_password:
         worksheet.update_cell(i, 8, "Skipped: Missing SMTP Password")
         continue
 
-    tracking_url = f"{os.getenv('TRACKING_BACKEND_URL')}/track?email={email}&sheet=Sales_Mails&row={i}"
+    tracking_url = f"{os.getenv('TRACKING_BACKEND_URL')}/track?email={email}&sheet={sub_sheet_name}&row={i}"
     html_message = f"{message}<img src='{tracking_url}' width='1' height='1' style='display:none;'>"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"Unlisted Radar <{from_email}>"
     msg["To"] = email
-
     part = MIMEText(html_message, "html")
     msg.attach(part)
 
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
             server.login(from_email, smtp_password)
             server.sendmail(from_email, email, msg.as_string())
 
