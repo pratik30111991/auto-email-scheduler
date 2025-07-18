@@ -9,97 +9,114 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from gspread.utils import rowcol_to_a1
 
-# Load environment variables
+# ENV Variables
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
 TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
-
 if not GOOGLE_JSON or not SHEET_ID or not TRACKING_BACKEND_URL:
     raise Exception("Missing GOOGLE_JSON, SHEET_ID, or TRACKING_BACKEND_URL")
 
-# Authenticate with Google Sheets
+# Google Auth
 creds = json.loads(GOOGLE_JSON)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
 client = gspread.authorize(credentials)
 spreadsheet = client.open_by_key(SHEET_ID)
 
-# Timezone setup
+# Timezone
 ist = pytz.timezone("Asia/Kolkata")
 
-def send_from_sheet(sheet, row_index, row):
-    # Skip completely empty rows
-    if not any(str(value).strip() for value in row.values()):
-        return
+# Load SMTP accounts from Domain Details sheet
+smtp_sheet = spreadsheet.worksheet("Domain Details")
+smtp_data = smtp_sheet.get_all_records()
+smtp_accounts = {}
+for row in smtp_data:
+    smtp_accounts[row["SubSheet Name"]] = row
 
-    status = row.get("Status", "").strip()
-    if status and "Mail Sent Successfully" in status:
-        return
-
+def send_email(row_index, row, sheet, smtp_info, headers_map):
     name = row.get("Name", "").strip()
     email = row.get("Email ID", "").strip()
-    subj = row.get("Subject", "").strip()
-    msg_body = row.get("Message", "").strip()
-    sched = row.get("Schedule Date & Time", "").strip()
+    subject = row.get("Subject", "").strip()
+    message = row.get("Message", "").strip()
+    schedule_str = row.get("Schedule Date & Time", "").strip()
+    status = row.get("Status", "").strip()
 
-    if not name or not email:
-        sheet.update_cell(row_index, headers_map["Status"], "Failed: Name/Email missing")
+    # Skip empty rows
+    if not name or not email or not schedule_str:
         return
 
+    # Skip if already sent or failed
+    if status:
+        return
+
+    # Parse schedule datetime
     try:
-        sched_clean = sched.replace("\xa0", " ").replace("\u200b", "").strip()
-        sched_dt = datetime.strptime(sched_clean, "%d/%m/%Y %H:%M:%S")
-        sched_dt = ist.localize(sched_dt)
-    except Exception:
-        sheet.update_cell(row_index, headers_map["Status"], "Skipped: Invalid Date Format")
+        schedule_dt = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
+        schedule_dt = ist.localize(schedule_dt)
+    except:
+        sheet.update_cell(row_index, headers_map["Status"], "Failed: Invalid Date Format")
         return
 
-    if datetime.now(ist) < sched_dt:
+    # Skip if not yet scheduled
+    if datetime.now(ist) < schedule_dt:
         return
 
-    sender = "sales@unlistedradar.in"
-    smtp_pass = os.getenv("SMTP_SALES")
-    if not smtp_pass:
-        sheet.update_cell(row_index, headers_map["Status"], "Failed: SMTP missing")
+    # Check content
+    if not subject or not message:
+        sheet.update_cell(row_index, headers_map["Status"], "Failed: Subject/Message missing")
         return
 
-    # Build email with tracking
+    # SMTP Info
+    sender = smtp_info["Email ID"].strip()
+    smtp_pass = smtp_info["Password"].strip()
+    smtp_server = smtp_info["SMTP Server"].strip()
+    smtp_port = int(smtp_info["Port"])
+
+    # Compose email
     msg = MIMEMultipart("alternative")
-    msg["From"] = f"Unlisted Radar <{sender}>"
+    msg["From"] = f"{sender}"
     msg["To"] = email
-    msg["Subject"] = subj.replace("\n", " ").strip()
+    msg["Subject"] = subject
 
-    tracking_url = f"{TRACKING_BACKEND_URL}/track?sheet={sheet.title}&row={row_index}&email={email}"
-    html = msg_body + f"<img src='{tracking_url}' width='1' height='1' />"
+    # Add tracking pixel
+    track_url = f"{TRACKING_BACKEND_URL}/track?sheet={sheet.title}&row={row_index}&email={email}"
+    html = message + f"<img src='{track_url}' width='1' height='1' />"
     msg.attach(MIMEText(html, "html"))
 
     try:
-        with smtplib.SMTP_SSL("md-114.webhostbox.net", 465) as server:
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
             server.login(sender, smtp_pass)
             server.send_message(msg)
 
+        # Success: Update sheet
         now_str = datetime.now(ist).strftime("%d/%m/%Y %H:%M:%S")
         sheet.update_cell(row_index, headers_map["Status"], "Mail Sent Successfully")
         sheet.update_cell(row_index, headers_map["Timestamp"], now_str)
-        print(f"✅ Sent {email}")
+        print(f"✅ Sent: {email} from {sender} via {smtp_server}")
     except Exception as e:
-        print(f"❌ Error sending to {email}: {e}")
-        sheet.update_cell(row_index, headers_map["Status"], f"Failed: {str(e)}")
+        print(f"❌ Failed: {email} from {sender} via {smtp_server}: {e}")
+        sheet.update_cell(row_index, headers_map["Status"], f"Failed: {str(e).splitlines()[0]}")
 
-# Process all relevant sheets
+# Process each sheet
 for sheet in spreadsheet.worksheets():
-    if sheet.title == "Domain Details":
+    title = sheet.title
+    if title == "Domain Details":
+        continue
+    print(f"📄 Processing Sheet: {title}")
+
+    smtp_info = smtp_accounts.get(title)
+    if not smtp_info:
+        print(f"⚠️ Skipping {title}: No SMTP config in Domain Details")
         continue
 
-    print(f"📄 Processing Sheet: {sheet.title}")
     headers = sheet.row_values(1)
     headers_map = {h.strip(): i + 1 for i, h in enumerate(headers)}
 
     required = ["Name", "Email ID", "Schedule Date & Time", "Status", "Subject", "Message", "Timestamp", "Open?", "Open Timestamp"]
-    if not all(col in headers_map for col in required):
-        print(f"ⓘ Skipping invalid sheet {sheet.title}")
+    if not all(h in headers_map for h in required):
+        print(f"ⓘ Skipping invalid sheet {title}")
         continue
 
-    data = sheet.get_all_records()
-    for idx, rec in enumerate(data, start=2):
-        send_from_sheet(sheet, idx, rec)
+    records = sheet.get_all_records()
+    for idx, row in enumerate(records, start=2):
+        send_email(idx, row, sheet, smtp_info, headers_map)
