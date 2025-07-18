@@ -7,11 +7,8 @@ import pytz
 import logging
 
 app = Flask(__name__)
-
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 
-# Use IST (India Standard Time)
 IST = pytz.timezone('Asia/Kolkata')
 
 # Google Sheets setup
@@ -40,34 +37,33 @@ def track_email_open():
         sheet = client.open_by_key("1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q").worksheet(sheet_name)
         row = int(row)
 
-        # Read current values
-        open_status = sheet.cell(row, 10).value  # "Open?" column
-        sheet_email = sheet.cell(row, 3).value   # Email ID column
-        open_timestamp = sheet.cell(row, 11).value  # "Open Timestamp"
+        email_from_sheet = sheet.cell(row, 3).value
+        open_status = sheet.cell(row, 10).value
+        open_timestamp = sheet.cell(row, 11).value
 
-        # Validate email
-        if sheet_email.strip().lower() != email_param.strip().lower():
-            logging.warning(f"Email mismatch on row {row}: Sheet={sheet_email}, Param={email_param}")
+        # Check email matches
+        if email_from_sheet.strip().lower() != email_param.strip().lower():
+            logging.warning(f"Email mismatch: Sheet={email_from_sheet}, Param={email_param}")
             return Response(status=204)
 
         # Skip if already opened
         if open_status == "Yes" and open_timestamp:
-            logging.info(f"Already marked as opened for row {row}")
+            logging.info(f"Row {row} already marked opened.")
             return Response(status=204)
 
-        # Get current IST time
+        # Update timestamp with current IST
         now = datetime.datetime.now(IST)
         open_time_str = now.strftime("%d/%m/%Y %H:%M:%S")
 
-        # Update "Open?" and "Open Timestamp"
-        sheet.update_cell(row, 10, "Yes")
-        sheet.update_cell(row, 11, open_time_str)
+        # Update Google Sheet
+        sheet.update_cell(row, 10, "Yes")               # Open?
+        sheet.update_cell(row, 11, open_time_str)       # Open Timestamp
 
-        logging.info(f"Marked as opened: row={row}, email={email_param}, time={open_time_str}")
-        return Response(status=204)
+        logging.info(f"Marked row {row} as opened at {open_time_str}")
+        return Response(status=200)
 
     except Exception as e:
-        logging.error(f"Error processing pixel for row={row}, email={email_param} → {str(e)}")
+        logging.error(f"Error in /track → {str(e)}")
         return "Error", 500
 
 if __name__ == '__main__':
