@@ -3,6 +3,7 @@ import json
 import smtplib
 import pytz
 from datetime import datetime, timedelta
+from time import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from email.mime.multipart import MIMEMultipart
@@ -91,7 +92,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
     msg["To"] = email
     msg["Subject"] = subject
 
-    tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}"
+    tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}&t={int(time())}"
     html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
     msg.attach(MIMEText(html, "html"))
 
