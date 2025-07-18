@@ -1,0 +1,33 @@
+name: Run Email Scheduler
+
+on:
+  schedule:
+    - cron: '*/2 * * * *'  # Every 2 minutes
+  workflow_dispatch:
+
+jobs:
+  run-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+      - name: Create credentials.json
+        run: echo "$GOOGLE_JSON" > credentials.json
+        env:
+          GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
+      - name: Run Scheduler
+        run: python main.py
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          TRACKING_BACKEND_URL: ${{ secrets.TRACKING_BACKEND_URL }}
+          SMTP_DILSHAD: ${{ secrets.SMTP_DILSHAD }}
+          SMTP_NANA: ${{ secrets.SMTP_NANA }}
+          SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
+          SMTP_INFO: ${{ secrets.SMTP_INFO }}
+          SMTP_SALES: ${{ secrets.SMTP_SALES }}
