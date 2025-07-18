@@ -2,7 +2,7 @@ import os
 import json
 import smtplib
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from email.mime.multipart import MIMEMultipart
@@ -61,8 +61,15 @@ def send_from_sheet(sheet, row_index, row, headers_map):
         sheet.update_cell(row_index, headers_map["Status"], "Invalid Schedule Date & Time")
         return
 
-    if datetime.now(ist) < sched_dt:
-        return  # Not time yet
+    now = datetime.now(ist)
+    if now < sched_dt:
+        sheet.update_cell(row_index, headers_map["Status"], "Skipped – Not Scheduled Yet")
+        return
+
+    # Prevent sending too old
+    if now - sched_dt > timedelta(minutes=30):
+        sheet.update_cell(row_index, headers_map["Status"], "Skipped – Schedule Too Old")
+        return
 
     sheet_name = sheet.title
     if sheet_name not in domain_map:
@@ -93,7 +100,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
             server.login(from_email, smtp_pass)
             server.send_message(msg)
 
-        now_str = datetime.now(ist).strftime("%d-%m-%Y %H:%M:%S")
+        now_str = now.strftime("%d-%m-%Y %H:%M:%S")
         sheet.update_cell(row_index, headers_map["Status"], "Mail Sent Successfully")
         sheet.update_cell(row_index, headers_map["Timestamp"], now_str)
         print(f"✅ Sent: {email} from {from_email} via {smtp_server}")
@@ -111,7 +118,11 @@ for sheet in spreadsheet.worksheets():
     headers = sheet.row_values(1)
     headers_map = {h.strip(): i + 1 for i, h in enumerate(headers)}
 
-    required_cols = ["Name", "Email ID", "Subject", "Message", "Schedule Date & Time", "Status", "Timestamp", "Open?", "Open Timestamp"]
+    required_cols = [
+        "Name", "Email ID", "Subject", "Message",
+        "Schedule Date & Time", "Status", "Timestamp",
+        "Open?", "Open Timestamp"
+    ]
     if not all(col in headers_map for col in required_cols):
         print(f"ⓘ Skipping invalid sheet {sheet_name}")
         continue
