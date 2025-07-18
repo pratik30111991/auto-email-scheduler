@@ -1,125 +1,122 @@
 import os
+import base64
 import json
 import smtplib
 import pytz
+import time
 from datetime import datetime
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from oauth2client.service_account import ServiceAccountCredentials
 from gspread.utils import rowcol_to_a1
 
-# Timezone
-INDIA_TZ = pytz.timezone("Asia/Kolkata")
+# Set timezone
+INDIA_TZ = pytz.timezone('Asia/Kolkata')
 
-# Load credentials
+# Load credentials from environment variable
+GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 with open("credentials.json", "w") as f:
-    f.write(os.environ["GOOGLE_JSON"])
+    f.write(GOOGLE_JSON)
 
+# Google Sheets auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-client = gspread.authorize(credentials)
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
 
-# Sheet ID from GitHub Secrets
-SHEET_ID = os.environ["SHEET_ID"]
-sheet = client.open_by_key(SHEET_ID)
+# Google Sheet ID
+sheet_id = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
 
-# SMTP account mapping
-SMTP_CREDENTIALS = {
-    "Dilshad": os.environ.get("SMTP_DILSHAD"),
-    "Nana": os.environ.get("SMTP_NANA"),
-    "Gaurav": os.environ.get("SMTP_GAURAV"),
-    "Info": os.environ.get("SMTP_INFO"),
-    "Sales": os.environ.get("SMTP_SALES")
-}
+# Tracking backend
+TRACKING_BACKEND = "https://email-tracking-backend-17rs.onrender.com/track"
 
-TRACKING_BACKEND_URL = os.environ["TRACKING_BACKEND_URL"]
+# Load domain & SMTP config
+domain_sheet = client.open_by_key(sheet_id).worksheet("Domain Details")
+domain_data = domain_sheet.get_all_records()
 
-def format_datetime(dt_str):
-    try:
-        return INDIA_TZ.localize(datetime.strptime(dt_str, "%d/%m/%Y %H:%M:%S"))
-    except Exception:
-        return None
+domain_config = {}
+for row in domain_data:
+    domain_config[row["Sheet Name"]] = {
+        "smtp_server": row["SMTP Server"],
+        "smtp_port": row["SMTP Port"],
+        "email": row["Email"],
+        "password": row["App Password"]
+    }
 
-def send_email(from_email, password, to_email, subject, html_body):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = from_email
-    msg["To"] = to_email
-    msg.attach(MIMEText(html_body, "html"))
+# Process each sheet
+spreadsheet = client.open_by_key(sheet_id)
+sheet_list = spreadsheet.worksheets()
 
-    server = smtplib.SMTP("smtp.gmail.com", 587)
-    server.starttls()
-    server.login(from_email, password)
-    server.sendmail(from_email, to_email, msg.as_string())
-    server.quit()
+for sheet in sheet_list:
+    sheet_name = sheet.title
+    if sheet_name == "Domain Details":
+        continue
 
-def process_sheet(worksheet):
-    rows = worksheet.get_all_values()
-    header = rows[0]
-    col_index = {col: idx for idx, col in enumerate(header)}
+    if sheet_name not in domain_config:
+        print(f"Skipping unknown sheet: {sheet_name}")
+        continue
 
-    for i, row in enumerate(rows[1:], start=2):
-        name = row[col_index["Name"]].strip()
-        email = row[col_index["Email ID"]].strip()
-        subject = row[col_index["Subject"]].strip()
-        message = row[col_index["Message"]].strip()
-        schedule_str = row[col_index["Schedule Date & Time"]].strip()
-        status = row[col_index["Status"]].strip()
+    print(f"🔧 Processing Sheet: {sheet_name}")
+    config = domain_config[sheet_name]
+    from_email = config["email"]
+    smtp_server = config["smtp_server"]
+    smtp_port = config["smtp_port"]
+    smtp_password = config["password"]
 
-        if not name or not email:
-            if not status:
-                worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Status']+1)}", "Failed: Name/Email missing")
-            continue
+    data = sheet.get_all_values()
+    headers = data[0]
+    records = data[1:]
 
-        if status and "Mail Sent Successfully" in status:
-            continue  # Skip already sent
+    header_map = {header: idx for idx, header in enumerate(headers)}
 
-        scheduled_dt = format_datetime(schedule_str)
-        if not scheduled_dt:
-            if not status:
-                worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Status']+1)}", "Skipped: Invalid Date Format")
-            continue
-
-        if datetime.now(INDIA_TZ) < scheduled_dt:
-            continue  # Not yet scheduled
-
-        domain = worksheet.title.split("_")[0]  # e.g., "Sales"
-        smtp_creds = SMTP_CREDENTIALS.get(domain)
-        if not smtp_creds:
-            worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Status']+1)}", "Failed: Sender Email/Password missing")
-            continue
-
+    for i, row in enumerate(records, start=2):
         try:
-            from_email, smtp_pass = smtp_creds.split(":")
-        except:
-            worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Status']+1)}", "Failed: Invalid SMTP format")
-            continue
+            name = row[header_map.get("Name", -1)].strip()
+            to_email = row[header_map.get("Email ID", -1)].strip()
+            subject = row[header_map.get("Subject", -1)].strip()
+            message = row[header_map.get("Message", -1)].strip()
+            schedule_str = row[header_map.get("Schedule Date & Time", -1)].strip()
+            status = row[header_map.get("Status", -1)].strip()
 
-        try:
-            # Add tracking pixel
-            pixel_url = f'{TRACKING_BACKEND_URL}/track?sheet={worksheet.title}&row={i}&email={email}'
-            full_message = f"{message}<img src='{pixel_url}' width='1' height='1' />"
+            if not to_email or not name:
+                continue
+            if status:
+                continue
+            if not schedule_str:
+                continue
 
-            send_email(from_email, smtp_pass, email, subject, full_message)
+            schedule_time = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
+            schedule_time = INDIA_TZ.localize(schedule_time)
+            current_time = datetime.now(INDIA_TZ)
 
-            now_str = datetime.now(INDIA_TZ).strftime("%d/%m/%Y %H:%M:%S")
-            worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Status']+1)}", "Mail Sent Successfully")
-            worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Timestamp']+1)}", now_str)
+            if current_time < schedule_time:
+                continue
+
+            # Send email
+            msg = MIMEMultipart("alternative")
+            msg["From"] = f"Unlisted Radar <{from_email}>"
+            msg["To"] = to_email
+            msg["Subject"] = subject
+
+            tracking_url = f"{TRACKING_BACKEND}?email={to_email}&sheet={sheet_name}"
+            html_with_tracking = f'{message}<br><img src="{tracking_url}" width="1" height="1" />'
+
+            msg.attach(MIMEText(html_with_tracking, "html"))
+
+            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+                server.login(from_email, smtp_password)
+                server.sendmail(from_email, to_email, msg.as_string())
+
+            now_str = current_time.strftime("%d/%m/%Y %H:%M:%S")
+
+            # Update status, timestamp
+            sheet.update_acell(rowcol_to_a1(i, header_map["Status"] + 1), "Mail Sent Successfully")
+            sheet.update_acell(rowcol_to_a1(i, header_map["Timestamp"] + 1), now_str)
+
+            print(f"✅ Email sent to {to_email} ({sheet_name} row {i})")
+
+            time.sleep(1)
+
         except Exception as e:
-            worksheet.update_acell(f"{rowcol_to_a1(i, col_index['Status']+1)}", f"Failed: {str(e).splitlines()[0]}")
-
-def main():
-    all_sheets = sheet.worksheets()
-    for ws in all_sheets:
-        title = ws.title
-        if title == "Domain Details":
-            continue
-        print(f"📄 Processing Sheet: {title}")
-        try:
-            process_sheet(ws)
-        except Exception as e:
-            print(f"❌ Error processing {title}: {e}")
-
-if __name__ == "__main__":
-    main()
+            print(f"❌ Error in row {i} of sheet {sheet_name}: {e}")
+            sheet.update_acell(rowcol_to_a1(i, header_map["Status"] + 1), f"Failed to Send")
