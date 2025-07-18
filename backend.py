@@ -1,74 +1,74 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, Response
 import gspread
-import io
-from datetime import datetime, timedelta
+from oauth2client.service_account import ServiceAccountCredentials
+import datetime
 import os
 import pytz
-from oauth2client.service_account import ServiceAccountCredentials
+import logging
 
 app = Flask(__name__)
 
-# Set timezone to IST
-tz_ist = pytz.timezone("Asia/Kolkata")
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 
-# Authenticate Google Sheets
-def get_gsheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_dict = os.getenv("GOOGLE_JSON")
-    if not creds_dict:
-        raise Exception("Missing GOOGLE_JSON environment variable.")
-    creds_dict = eval(creds_dict)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(os.getenv("SHEET_ID"))
-    return sheet
+# Use IST (India Standard Time)
+IST = pytz.timezone('Asia/Kolkata')
 
-@app.route("/track", methods=["GET"])
-def track():
-    sheet_name = request.args.get("sheet")
-    row = int(request.args.get("row", 0))
-    email_param = request.args.get("email", "").strip().lower()
+# Google Sheets setup
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+GOOGLE_JSON = os.environ.get("GOOGLE_JSON")
+
+if not GOOGLE_JSON:
+    raise Exception("GOOGLE_JSON env variable missing")
+
+with open("credentials.json", "w") as f:
+    f.write(GOOGLE_JSON)
+
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
+
+@app.route('/track', methods=['GET'])
+def track_email_open():
+    sheet_name = request.args.get('sheet')
+    row = request.args.get('row')
+    email_param = request.args.get('email')
 
     if not sheet_name or not row or not email_param:
-        return "", 204
+        return "Missing parameters", 400
 
     try:
-        sheet = get_gsheet()
-        worksheet = sheet.worksheet(sheet_name)
+        sheet = client.open_by_key("1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q").worksheet(sheet_name)
+        row = int(row)
 
-        email_cell = worksheet.cell(row, 3).value.strip().lower()  # Column C
-        status = worksheet.cell(row, 8).value  # Column H
-        timestamp_str = worksheet.cell(row, 9).value  # Column I
+        # Read current values
+        open_status = sheet.cell(row, 10).value  # "Open?" column
+        sheet_email = sheet.cell(row, 3).value   # Email ID column
+        open_timestamp = sheet.cell(row, 11).value  # "Open Timestamp"
 
-        # Confirm email matches and email was already sent
-        if email_cell != email_param or "Mail Sent Successfully" not in status:
-            return "", 204
+        # Validate email
+        if sheet_email.strip().lower() != email_param.strip().lower():
+            logging.warning(f"Email mismatch on row {row}: Sheet={sheet_email}, Param={email_param}")
+            return Response(status=204)
 
-        # Check if open happened too early (proxy preload)
-        if timestamp_str:
-            sent_time = datetime.strptime(timestamp_str, "%d-%m-%Y %H:%M:%S")
-            now = datetime.now(tz_ist)
-            if (now - sent_time).total_seconds() < 5:
-                return "", 204
+        # Skip if already opened
+        if open_status == "Yes" and open_timestamp:
+            logging.info(f"Already marked as opened for row {row}")
+            return Response(status=204)
 
-        # Only mark if not already opened
-        open_status = worksheet.cell(row, 10).value  # Column J
-        if open_status != "Yes":
-            worksheet.update_cell(row, 10, "Yes")  # "Open?" column
-            open_time = datetime.now(tz_ist).strftime("%d-%m-%Y %H:%M:%S")
-            worksheet.update_cell(row, 11, open_time)  # "Open Timestamp" column
+        # Get current IST time
+        now = datetime.datetime.now(IST)
+        open_time_str = now.strftime("%d/%m/%Y %H:%M:%S")
+
+        # Update "Open?" and "Open Timestamp"
+        sheet.update_cell(row, 10, "Yes")
+        sheet.update_cell(row, 11, open_time_str)
+
+        logging.info(f"Marked as opened: row={row}, email={email_param}, time={open_time_str}")
+        return Response(status=204)
 
     except Exception as e:
-        print("Error:", e)
-        return "", 204
+        logging.error(f"Error processing pixel for row={row}, email={email_param} → {str(e)}")
+        return "Error", 500
 
-    # Return 1x1 transparent pixel
-    img = io.BytesIO(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x4c\x01\x00\x3b')
-    return send_file(img, mimetype='image/gif')
-
-@app.route("/")
-def home():
-    return "Tracking backend is live!", 200
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run()
