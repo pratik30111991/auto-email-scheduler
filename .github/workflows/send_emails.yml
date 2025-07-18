@@ -1,25 +1,33 @@
-name: Send Scheduled Emails
+name: 📧 Send Scheduled Emails
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # every 5 minutes
+    - cron: "*/5 * * * *"  # every 5 minutes
   workflow_dispatch:
 
 jobs:
-  send:
+  send_emails:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
 
-      - name: Set up Python
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: 📦 Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run main.py
+      - name: 🗝️ Save GOOGLE_JSON to file
+        run: echo "$GOOGLE_JSON" > credentials.json
+        env:
+          GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
+
+      - name: 🚀 Run main.py
+        run: python main.py
         env:
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
@@ -29,6 +37,3 @@ jobs:
           SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
           SMTP_INFO: ${{ secrets.SMTP_INFO }}
           SMTP_SALES: ${{ secrets.SMTP_SALES }}
-        run: |
-          echo "$GOOGLE_JSON" > credentials.json
-          python main.py
