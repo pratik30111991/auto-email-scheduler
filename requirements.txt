@@ -1,5 +1,4 @@
-Flask
 gspread
-pytz
 oauth2client
-gspread
+pytz
+Flask
