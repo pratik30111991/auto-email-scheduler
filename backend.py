@@ -1,41 +1,69 @@
-from flask import Flask, request, Response
-import os
+from flask import Flask, request, make_response
 import gspread
-import pytz
-from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
+import json
+import os
+from datetime import datetime
+import pytz
 
 app = Flask(__name__)
 
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
 
-creds = gspread.service_account_from_dict(json.loads(GOOGLE_JSON))
-sheet = creds.open_by_key(SHEET_ID)
+if not GOOGLE_JSON or not SHEET_ID:
+    raise Exception("GOOGLE_JSON or SHEET_ID missing")
 
-TZ = pytz.timezone("Asia/Kolkata")
+creds = json.loads(GOOGLE_JSON)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
+client = gspread.authorize(credentials)
+spreadsheet = client.open_by_key(SHEET_ID)
 
-@app.route("/track")
-def track():
+ist = pytz.timezone("Asia/Kolkata")
+
+@app.route("/track", methods=["GET"])
+def track_open():
     sheet_name = request.args.get("sheet")
-    row = int(request.args.get("row", "0"))
-    email = request.args.get("email", "")
+    row = request.args.get("row")
+    email = request.args.get("email")
 
-    ws = sheet.worksheet(sheet_name)
-    headers = ws.row_values(1)
-    col = {h: i + 1 for i, h in enumerate(headers)}
+    if not sheet_name or not row or not email:
+        return make_response("", 204)
 
-    if ws.cell(row, col["Email ID"]).value.strip() != email:
-        return "", 204
-    if ws.cell(row, col["Open?"]).value.strip() == "Yes":
-        return "", 204
+    try:
+        sheet = spreadsheet.worksheet(sheet_name)
+        row = int(row)
+        headers = sheet.row_values(1)
+        headers_map = {h.strip(): i + 1 for i, h in enumerate(headers)}
+        open_col = headers_map.get("Open?")
+        open_time_col = headers_map.get("Open Timestamp")
+        email_col = headers_map.get("Email ID")
 
-    now = datetime.now(TZ).strftime("%d/%m/%Y %H:%M:%S")
-    ws.update_cell(row, col["Open?"], "Yes")
-    ws.update_cell(row, col["Open Timestamp"], now)
+        if not open_col or not open_time_col:
+            return make_response("", 204)
 
-    pixel = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00" \
-            b"\xFF\xFF\xFF!\xF9\x04\x01\x00\x00\x00\x00," \
-            b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02" \
-            b"D\x01\x00;"
-    return Response(pixel, mimetype="image/gif")
+        cell_email = sheet.cell(row, email_col).value.strip().lower()
+        if cell_email != email.strip().lower():
+            return make_response("", 204)
+
+        sheet.update_cell(row, open_col, "Yes")
+        sheet.update_cell(row, open_time_col, datetime.now(ist).strftime("%d-%m-%Y %H:%M:%S"))
+
+    except Exception as e:
+        print("❌ Error in /track:", e)
+
+    # Return 1x1 transparent GIF (invisible pixel)
+    gif = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xFF\xFF\xFF!\xF9' \
+          b'\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02' \
+          b'\x02D\x01\x00;'
+    response = make_response(gif)
+    response.headers.set('Content-Type', 'image/gif')
+    return response
+
+@app.route("/")
+def index():
+    return "✅ Email Tracker is live!"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
