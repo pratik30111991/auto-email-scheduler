@@ -1,80 +1,76 @@
-from flask import Flask, request, make_response
+from flask import Flask, request, send_file
 import datetime
-import gspread
-import os
-import json
 import pytz
+import os
+import gspread
+import io
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
-@app.route('/track', methods=['GET'])
+# Authenticate with Google Sheets
+def get_sheet(sheet_name):
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds_json = os.getenv('GOOGLE_JSON')
+
+    if not creds_json:
+        raise Exception("GOOGLE_JSON environment variable not set")
+
+    creds_dict = eval(creds_json)  # securely convert string to dict
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+
+    # Use your Sheet ID here (hardcoded or from env)
+    SHEET_ID = os.getenv("SHEET_ID")  # Set this in Render
+    sheet = client.open_by_key(SHEET_ID).worksheet(sheet_name)
+    return sheet
+
+@app.route('/track')
 def track_email():
+    sheet_name = request.args.get("sheet")
+    row = request.args.get("row")
+    email_param = request.args.get("email")
+
+    if not sheet_name or not row or not email_param:
+        return "Missing required parameters", 400
+
     try:
-        sheet_name = request.args.get('sheet')
-        row_number = int(request.args.get('row'))
-        email_param = request.args.get('email')
+        row = int(row)
+        sheet = get_sheet(sheet_name)
 
-        if not sheet_name or not row_number or not email_param:
-            return make_response("Missing required parameters", 400)
+        # Get all values of the row
+        row_values = sheet.row_values(row)
+        open_col_index = row_values.index("Yes") + 1 if "Yes" in row_values else None
 
-        # Load credentials
-        creds = json.loads(os.environ['GOOGLE_JSON'])
-        gc = gspread.service_account_from_dict(creds)
-        sh = gc.open_by_key(os.environ['SHEET_ID'])
-        worksheet = sh.worksheet(sheet_name)
+        # Always use fixed column indices
+        OPEN_COL = 9      # "Open?" (I column)
+        OPEN_TIME_COL = 10  # "Open Timestamp" (J column)
+        EMAIL_COL = 3     # "Email ID" (C column)
 
-        values = worksheet.row_values(row_number)
+        sheet_email = sheet.cell(row, EMAIL_COL).value.strip().lower()
 
-        if len(values) < 9:
-            return make_response("Row data incomplete", 204)
+        if sheet_email != email_param.strip().lower():
+            return "", 204  # email mismatch (don't mark open)
 
-        current_open = values[8].strip() if len(values) >= 9 else ''
-        current_email = values[2].strip() if len(values) >= 3 else ''
+        open_status = sheet.cell(row, OPEN_COL).value
 
-        # Check if already opened
-        if current_open == 'Yes':
-            return pixel_response()
+        if open_status != "Yes":
+            # Get current time in IST
+            ist = pytz.timezone('Asia/Kolkata')
+            current_time = datetime.datetime.now(ist).strftime('%d-%m-%Y %H:%M:%S')
 
-        # Ensure email matches
-        if current_email.lower() != email_param.lower():
-            return make_response("Email mismatch", 204)
-
-        # Check for proxy User-Agent (Gmail image proxy)
-        ua = request.headers.get('User-Agent', '').lower()
-        if 'googleimageproxy' in ua or 'google' in request.remote_addr:
-            return make_response("Ignored proxy request", 204)
-
-        # Optionally: Check if opened too soon (e.g., < 60 seconds after sent)
-        timestamp_str = values[7].strip()  # Timestamp (when mail was sent)
-        if timestamp_str:
-            try:
-                tz = pytz.timezone('Asia/Kolkata')
-                sent_time = datetime.datetime.strptime(timestamp_str, '%d/%m/%Y %H:%M:%S')
-                sent_time = tz.localize(sent_time)
-                now = datetime.datetime.now(tz)
-                if (now - sent_time).total_seconds() < 60:
-                    return make_response("Ignored: opened too soon", 204)
-            except Exception as e:
-                pass  # Continue even if timestamp can't be parsed
-
-        # Update 'Open?' and 'Open Timestamp'
-        worksheet.update_cell(row_number, 9, 'Yes')  # Open?
-        open_time = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%d/%m/%Y %H:%M:%S')
-        worksheet.update_cell(row_number, 10, open_time)  # Open Timestamp
-
-        return pixel_response()
+            # Update "Open?" and "Open Timestamp"
+            sheet.update_cell(row, OPEN_COL, "Yes")
+            sheet.update_cell(row, OPEN_TIME_COL, current_time)
 
     except Exception as e:
-        print(f"Error in /track: {str(e)}")
-        return make_response("Error", 204)
+        print(f"Error: {e}")
+        return "Internal Error", 500
 
-def pixel_response():
-    response = make_response('', 204)
-    response.headers['Content-Type'] = 'image/gif'
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
+    # Return a transparent 1x1 pixel
+    pixel = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\xff\x00\xc0\xc0\xc0\x00\x00\x00\x21\xf9\x04' \
+            b'\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b'
+    return send_file(io.BytesIO(pixel), mimetype='image/gif')
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
