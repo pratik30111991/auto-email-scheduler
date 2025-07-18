@@ -1,64 +1,61 @@
 from flask import Flask, request, Response
 import gspread
 import os
+import datetime
 import json
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-import pytz
 
 app = Flask(__name__)
 
-# Setup timezone
-INDIA_TZ = pytz.timezone('Asia/Kolkata')
+@app.route('/')
+def index():
+    return '✅ Email Tracking Backend is Live', 200
 
-# Setup Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(os.environ['GOOGLE_JSON']), scope)
-client = gspread.authorize(creds)
-
-@app.route("/track", methods=["GET"])
+@app.route('/track')
 def track():
-    sheet_name = request.args.get("sheet")
-    row = request.args.get("row")
-    email_param = request.args.get("email")
+    sheet_name = request.args.get('sheet')
+    row = request.args.get('row')
+    email_param = request.args.get('email')
 
-    if not sheet_name or not row or not email_param:
-        return Response(status=400)
+    if not all([sheet_name, row, email_param]):
+        print("❌ Missing parameters in tracking URL")
+        return Response(status=204)
 
     try:
-        sheet = client.open_by_key(os.environ['SHEET_ID']).worksheet(sheet_name)
+        gc = gspread.service_account_from_dict(json.loads(os.environ['GOOGLE_JSON']))
+        sh = gc.open_by_key(os.environ['SHEET_ID'])
+        worksheet = sh.worksheet(sheet_name)
+
         row = int(row)
 
-        data = sheet.row_values(row)
-        header = sheet.row_values(1)
+        # Read headers to find "Email ID", "Open?", and "Open Timestamp"
+        headers = worksheet.row_values(1)
+        email_col = headers.index("Email ID") + 1
+        open_col = headers.index("Open?") + 1
+        timestamp_col = headers.index("Open Timestamp") + 1
 
-        if "Email ID" not in header or "Open?" not in header or "Open Timestamp" not in header:
-            return Response(status=400)
+        # Get email in sheet
+        email_in_sheet = worksheet.cell(row, email_col).value
+        if not email_in_sheet:
+            print(f"❌ No email found in row {row}")
+            return Response(status=204)
 
-        email_col = header.index("Email ID") + 1
-        open_col = header.index("Open?") + 1
-        timestamp_col = header.index("Open Timestamp") + 1
-
-        email_in_sheet = sheet.cell(row, email_col).value.strip().lower()
+        email_in_sheet = email_in_sheet.strip().lower()
         if email_in_sheet != email_param.strip().lower():
-            return Response(status=204)  # Do not update on proxy mismatch
+            print(f"❌ Email mismatch: sheet='{email_in_sheet}' vs pixel='{email_param}'")
+            return Response(status=204)
 
-        open_status = sheet.cell(row, open_col).value
-        if open_status != "Yes":
-            now = datetime.now(INDIA_TZ).strftime('%d-%m-%Y %H:%M:%S')
-            sheet.update_cell(row, open_col, "Yes")
-            sheet.update_cell(row, timestamp_col, now)
+        # Check if already opened
+        open_status = worksheet.cell(row, open_col).value
+        if open_status and open_status.strip().lower() == "yes":
+            print(f"🔁 Row {row} already marked as opened")
+            return Response(status=204)
+
+        # Update "Open?" and "Open Timestamp"
+        worksheet.update_cell(row, open_col, "Yes")
+        worksheet.update_cell(row, timestamp_col, datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+        print(f"✅ Marked opened for row {row}, email={email_param}")
+        return Response(status=204)
 
     except Exception as e:
-        print("Error:", e)
-        return Response(status=500)
-
-    # Return tracking pixel (1x1 transparent GIF)
-    pixel = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xFF\xFF\xFF!' \
-            b'\xF9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01' \
-            b'\x00\x00\x02\x02D\x01\x00;'
-    return Response(pixel, mimetype='image/gif')
-
-@app.route("/")
-def home():
-    return "Tracking backend is live!", 200
+        print(f"❌ Exception: {str(e)}")
+        return Response(status=204)
