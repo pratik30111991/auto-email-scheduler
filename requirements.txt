@@ -1,8 +1,5 @@
-gspread
-oauth2client
-pytz
-imaplib2
-python-dotenv
-schedule
 Flask
-gunicorn
+gspread
+pytz
+oauth2client
+gspread
