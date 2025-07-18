@@ -13,14 +13,10 @@ from gspread.utils import rowcol_to_a1
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
 TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
-ENABLED_SHEETS = os.getenv("ENABLED_SHEETS", "")
-
 if not GOOGLE_JSON or not SHEET_ID or not TRACKING_BACKEND_URL:
     raise Exception("Missing GOOGLE_JSON, SHEET_ID, or TRACKING_BACKEND_URL")
 
-enabled_sheet_list = [s.strip() for s in ENABLED_SHEETS.split(",") if s.strip()]
-
-# Authenticate with Google Sheets
+# Google Sheets auth
 creds = json.loads(GOOGLE_JSON)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
@@ -30,8 +26,14 @@ spreadsheet = client.open_by_key(SHEET_ID)
 # Timezone
 ist = pytz.timezone("Asia/Kolkata")
 
-# SMTP cache
-smtp_cache = {}
+# Sheet → SMTP mapping
+domain_map = {
+    "Dilshad_Mails": ("dilshad@ticketingplatform.live", "tuesday.mxrouting.net", 465),
+    "Nana_Mails": ("nana_kante@ticketingplatform.live", "md-114.webhostbox.net", 465),
+    "Gaurav_Mails": ("gaurav@ticketingplatform.live", "tuesday.mxrouting.net", 465),
+    "Info_Mails": ("info@ticketingplatform.live", "tuesday.mxrouting.net", 465),
+    "Sales_Mails": ("sales@unlistedradar.in", "md-114.webhostbox.net", 465),
+}
 
 def send_from_sheet(sheet, row_index, row, headers_map):
     status = row.get("Status", "").strip()
@@ -44,91 +46,68 @@ def send_from_sheet(sheet, row_index, row, headers_map):
     message = row.get("Message", "").strip()
     sched = row.get("Schedule Date & Time", "").strip()
 
-    if not name or not email:
-        sheet.update_cell(row_index, headers_map["Status"], "Failed: Name/Email missing")
+    # 🔁 Skip rows that are incomplete — NO status update
+    if not name or not email or not sched:
         return
 
     try:
         sched_dt = datetime.strptime(sched, "%d/%m/%Y %H:%M:%S")
         sched_dt = ist.localize(sched_dt)
     except:
-        sheet.update_cell(row_index, headers_map["Status"], "Skipped: Invalid Date Format")
-        return
+        return  # Invalid date format — skip silently
 
     if datetime.now(ist) < sched_dt:
-        return
+        return  # Not time yet
 
-    sender = None
-    smtp_host = None
-    smtp_port = None
-    smtp_pass = None
-
-    # Use correct sender based on sheet
     sheet_name = sheet.title
-    env_key = "SMTP_" + sheet_name.split("_")[0].upper()
-    smtp_pass = os.getenv(env_key)
-
-    domain_map = {
-        "Dilshad_Mails": ("dilshad@ticketingplatform.live", "tuesday.mxrouting.net", 465),
-        "Nana_Mails": ("nana_kante@ticketingplatform.live", "md-114.webhostbox.net", 465),
-        "Gaurav_Mails": ("gaurav@ticketingplatform.live", "tuesday.mxrouting.net", 465),
-        "Info_Mails": ("info@ticketingplatform.live", "tuesday.mxrouting.net", 465),
-        "Sales_Mails": ("sales@unlistedradar.in", "md-114.webhostbox.net", 465),
-    }
-
-    if sheet_name in domain_map and smtp_pass:
-        sender, smtp_host, smtp_port = domain_map[sheet_name]
-    else:
-        sheet.update_cell(row_index, headers_map["Status"], "Failed: SMTP config missing")
+    if sheet_name not in domain_map:
+        print(f"❌ Missing SMTP mapping for {sheet_name}")
         return
 
-    # Compose email
+    from_email, smtp_server, smtp_port = domain_map[sheet_name]
+    smtp_env_key = f'SMTP_{sheet_name.split("_")[0].upper()}'
+    smtp_pass = os.getenv(smtp_env_key)
+    if not smtp_pass:
+        print(f"❌ Missing SMTP password for {sheet_name}")
+        return
+
+    # Create email
     msg = MIMEMultipart("alternative")
-    msg["From"] = sender
+    msg["From"] = from_email
     msg["To"] = email
     msg["Subject"] = subject
-    track_url = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}"
-    html = message + f"<img src='{track_url}' width='1' height='1' />"
+
+    tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}"
+    html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
     msg.attach(MIMEText(html, "html"))
 
     try:
-        if (smtp_host, sender) not in smtp_cache:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port)
-            server.login(sender, smtp_pass)
-            smtp_cache[(smtp_host, sender)] = server
-        else:
-            server = smtp_cache[(smtp_host, sender)]
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+            server.login(from_email, smtp_pass)
+            server.send_message(msg)
 
-        server.send_message(msg)
-        now_str = datetime.now(ist).strftime("%d/%m/%Y %H:%M:%S")
+        now_str = datetime.now(ist).strftime("%d-%m-%Y %H:%M:%S")
         sheet.update_cell(row_index, headers_map["Status"], "Mail Sent Successfully")
         sheet.update_cell(row_index, headers_map["Timestamp"], now_str)
-        print(f"✅ Sent: {email} from {sender} via {smtp_host}")
+        print(f"✅ Sent: {email} from {from_email} via {smtp_server}")
     except Exception as e:
-        print(f"❌ Error sending to {email}: {e}")
-        sheet.update_cell(row_index, headers_map["Status"], "Failed to Send")
+        print(f"❌ Failed to send to {email}: {e}")
 
-# Go through each sheet
+# Process each sheet
 for sheet in spreadsheet.worksheets():
-    if sheet.title == "Domain Details":
-        continue
-    if enabled_sheet_list and sheet.title not in enabled_sheet_list:
-        print(f"⚠️ Skipping sheet not in ENABLED_SHEETS: {sheet.title}")
+    sheet_name = sheet.title
+    if sheet_name == "Domain Details" or sheet_name not in domain_map:
         continue
 
-    print(f"📄 Processing Sheet: {sheet.title}")
+    print(f"📄 Processing Sheet: {sheet_name}")
     headers = sheet.row_values(1)
-    headers_map = {h: i + 1 for i, h in enumerate(headers)}
+    headers_map = {h.strip(): i + 1 for i, h in enumerate(headers)}
 
-    required = ["Name", "Email ID", "Schedule Date & Time", "Status", "Subject", "Message", "Timestamp", "Open?", "Open Timestamp"]
-    if not all(col in headers_map for col in required):
-        print(f"ⓘ Skipping invalid sheet {sheet.title}")
+    required_cols = ["Name", "Email ID", "Subject", "Message", "Schedule Date & Time", "Status", "Timestamp", "Open?", "Open Timestamp"]
+    if not all(col in headers_map for col in required_cols):
+        print(f"ⓘ Skipping invalid sheet {sheet_name}")
         continue
 
     data = sheet.get_all_records()
-    for idx, rec in enumerate(data, start=2):
-        send_from_sheet(sheet, idx, rec, headers_map)
-
-# Close SMTP connections
-for server in smtp_cache.values():
-    server.quit()
+    for idx, row in enumerate(data, start=2):
+        send_from_sheet(sheet, idx, row, headers_map)
