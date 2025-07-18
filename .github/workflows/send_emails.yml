@@ -1,37 +1,40 @@
-name: 📧 Send Scheduled Emails
+name: Send Scheduled Emails
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # every 5 minutes
-  workflow_dispatch:
+    - cron: '*/5 * * * *'  # Runs every 5 minutes
+  workflow_dispatch:       # Allows manual trigger
 
 jobs:
-  send_emails:
+  send-emails:
     runs-on: ubuntu-latest
 
     steps:
-      - name: ⬇️ Checkout Repository
+      - name: ⬇️ Checkout repository
         uses: actions/checkout@v3
 
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: 📦 Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: 🗝️ Save GOOGLE_JSON to file
+      - name: 🔐 Save service account to credentials.json
         run: echo "$GOOGLE_JSON" > credentials.json
         env:
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
 
-      - name: 🚀 Run main.py
+      - name: 🚀 Run email scheduler
         run: python main.py
         env:
           GOOGLE_JSON: ${{ secrets.GOOGLE_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           TRACKING_BACKEND_URL: ${{ secrets.TRACKING_BACKEND_URL }}
+
           SMTP_DILSHAD: ${{ secrets.SMTP_DILSHAD }}
           SMTP_NANA: ${{ secrets.SMTP_NANA }}
           SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
