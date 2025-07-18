@@ -1,48 +1,41 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, Response
 import os
-import io
 import gspread
+import pytz
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
-import pytz
 
 app = Flask(__name__)
+
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
 
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SHEET_ID)
+creds = gspread.service_account_from_dict(json.loads(GOOGLE_JSON))
+sheet = creds.open_by_key(SHEET_ID)
+
+TZ = pytz.timezone("Asia/Kolkata")
 
 @app.route("/track")
 def track():
     sheet_name = request.args.get("sheet")
-    row = request.args.get("row")
-    email_param = request.args.get("email", "").strip()
+    row = int(request.args.get("row", "0"))
+    email = request.args.get("email", "")
 
-    if not all([sheet_name, row, email_param]):
+    ws = sheet.worksheet(sheet_name)
+    headers = ws.row_values(1)
+    col = {h: i + 1 for i, h in enumerate(headers)}
+
+    if ws.cell(row, col["Email ID"]).value.strip() != email:
+        return "", 204
+    if ws.cell(row, col["Open?"]).value.strip() == "Yes":
         return "", 204
 
-    try:
-        worksheet = sheet.worksheet(sheet_name)
-        headers = worksheet.row_values(1)
-        col_map = {h: i+1 for i, h in enumerate(headers)}
+    now = datetime.now(TZ).strftime("%d/%m/%Y %H:%M:%S")
+    ws.update_cell(row, col["Open?"], "Yes")
+    ws.update_cell(row, col["Open Timestamp"], now)
 
-        email_in_sheet = worksheet.cell(int(row), col_map["Email ID"]).value.strip()
-        status = worksheet.cell(int(row), col_map["Open?"]).value.strip()
-
-        if email_param != email_in_sheet or status == "Yes":
-            return "", 204
-
-        now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%d/%m/%Y %H:%M:%S")
-        worksheet.update_cell(int(row), col_map["Open?"], "Yes")
-        worksheet.update_cell(int(row), col_map["Open Timestamp"], now_str)
-        print(f"✅ Tracked open for row {row} on sheet {sheet_name}")
-    except Exception as e:
-        print("Error in tracking:", e)
-
-    return send_file(io.BytesIO(b""), mimetype="image/png")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0")
+    pixel = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00" \
+            b"\xFF\xFF\xFF!\xF9\x04\x01\x00\x00\x00\x00," \
+            b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02" \
+            b"D\x01\x00;"
+    return Response(pixel, mimetype="image/gif")
