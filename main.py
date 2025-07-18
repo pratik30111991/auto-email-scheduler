@@ -1,122 +1,104 @@
 import os
-import base64
 import json
-import smtplib
-import pytz
 import time
-from datetime import datetime
+import pytz
+import smtplib
 import gspread
+from datetime import datetime
+from email.message import EmailMessage
 from oauth2client.service_account import ServiceAccountCredentials
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from gspread.utils import rowcol_to_a1
 
-# Set timezone
-INDIA_TZ = pytz.timezone('Asia/Kolkata')
-
-# Load credentials from environment variable
+# Load credentials
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
+SHEET_ID = os.getenv("SHEET_ID")
+TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
+if not all([GOOGLE_JSON, SHEET_ID, TRACKING_BACKEND_URL]):
+    raise Exception("GOOGLE_JSON, SHEET_ID, or TRACKING_BACKEND_URL not set in environment.")
+
+# Write credentials file
 with open("credentials.json", "w") as f:
     f.write(GOOGLE_JSON)
 
-# Google Sheets auth
+# Connect to Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 client = gspread.authorize(creds)
+sheet = client.open_by_key(SHEET_ID)
 
-# Google Sheet ID
-sheet_id = "1J7bS1MfkLh5hXnpBfHdx-uYU7Qf9gc965CdW-j9mf2Q"
-
-# Tracking backend
-TRACKING_BACKEND = "https://email-tracking-backend-17rs.onrender.com/track"
-
-# Load domain & SMTP config
-domain_sheet = client.open_by_key(sheet_id).worksheet("Domain Details")
-domain_data = domain_sheet.get_all_records()
-
-domain_config = {}
-for row in domain_data:
-    domain_config[row["Sheet Name"]] = {
-        "smtp_server": row["SMTP Server"],
-        "smtp_port": row["SMTP Port"],
-        "email": row["Email"],
-        "password": row["App Password"]
-    }
-
-# Process each sheet
-spreadsheet = client.open_by_key(sheet_id)
-sheet_list = spreadsheet.worksheets()
-
-for sheet in sheet_list:
-    sheet_name = sheet.title
+# Sheet and column config
+all_sheets = sheet.worksheets()
+for worksheet in all_sheets:
+    sheet_name = worksheet.title
     if sheet_name == "Domain Details":
         continue
-
-    if sheet_name not in domain_config:
-        print(f"Skipping unknown sheet: {sheet_name}")
+    print(f"\n📄 Processing Sheet: {sheet_name}")
+    records = worksheet.get_all_records()
+    if not records:
         continue
 
-    print(f"🔧 Processing Sheet: {sheet_name}")
-    config = domain_config[sheet_name]
-    from_email = config["email"]
-    smtp_server = config["smtp_server"]
-    smtp_port = config["smtp_port"]
-    smtp_password = config["password"]
+    # Map column names
+    header_row = worksheet.row_values(1)
+    col_map = {name.strip(): i+1 for i, name in enumerate(header_row)}
+    required_cols = ["Name", "Email ID", "Schedule Date & Time", "Status", "Subject", "Message"]
+    if not all(k in col_map for k in required_cols):
+        print(f"❌ Skipping {sheet_name}: Missing columns.")
+        continue
 
-    data = sheet.get_all_values()
-    headers = data[0]
-    records = data[1:]
+    # Get sender config
+    domain_sheet = sheet.worksheet("Domain Details")
+    domain_data = domain_sheet.get_all_records()
+    sender_email = next((r["Sender Email ID"] for r in domain_data if r["Sheet Name"] == sheet_name), None)
+    smtp_password = os.getenv(f'SMTP_{sender_email.split("@")[0].upper()}')
 
-    header_map = {header: idx for idx, header in enumerate(headers)}
+    if not sender_email or not smtp_password:
+        print(f"❌ Skipping {sheet_name}: Sender Email/Password missing.")
+        continue
 
-    for i, row in enumerate(records, start=2):
+    for idx, row in enumerate(records, start=2):
+        name = row.get("Name", "").strip()
+        to_email = row.get("Email ID", "").strip()
+        subject = str(row.get("Subject", "")).strip().replace('\n', ' ').replace('\r', '')
+        message = row.get("Message", "").strip()
+        schedule_str = row.get("Schedule Date & Time", "").strip()
+        status = row.get("Status", "").strip()
+
+        if not name or not to_email:
+            worksheet.update_cell(idx, col_map["Status"], "Failed: Name/Email missing")
+            continue
+        if status and ("Successfully" in status or status.startswith("Failed")):
+            continue
+
         try:
-            name = row[header_map.get("Name", -1)].strip()
-            to_email = row[header_map.get("Email ID", -1)].strip()
-            subject = row[header_map.get("Subject", -1)].strip()
-            message = row[header_map.get("Message", -1)].strip()
-            schedule_str = row[header_map.get("Schedule Date & Time", -1)].strip()
-            status = row[header_map.get("Status", -1)].strip()
+            schedule_dt = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
+            schedule_dt = pytz.timezone("Asia/Kolkata").localize(schedule_dt)
+        except:
+            worksheet.update_cell(idx, col_map["Status"], "Failed: Invalid Date Format")
+            continue
 
-            if not to_email or not name:
-                continue
-            if status:
-                continue
-            if not schedule_str:
-                continue
+        now = pytz.timezone("Asia/Kolkata").localize(datetime.now())
+        if now < schedule_dt:
+            continue  # Not yet time
 
-            schedule_time = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
-            schedule_time = INDIA_TZ.localize(schedule_time)
-            current_time = datetime.now(INDIA_TZ)
-
-            if current_time < schedule_time:
-                continue
-
-            # Send email
-            msg = MIMEMultipart("alternative")
-            msg["From"] = f"Unlisted Radar <{from_email}>"
-            msg["To"] = to_email
+        try:
+            # Construct email
+            msg = EmailMessage()
             msg["Subject"] = subject
+            msg["From"] = f"Unlisted Radar <{sender_email}>"
+            msg["To"] = to_email
+            msg.set_content("This email contains HTML content.")
+            tracking_url = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={idx}&email={to_email}"
+            html_with_pixel = message + f'<img src="{tracking_url}" width="1" height="1" />'
+            msg.add_alternative(html_with_pixel, subtype='html')
 
-            tracking_url = f"{TRACKING_BACKEND}?email={to_email}&sheet={sheet_name}"
-            html_with_tracking = f'{message}<br><img src="{tracking_url}" width="1" height="1" />'
+            with smtplib.SMTP_SSL("smtp.zoho.in", 465) as server:
+                server.login(sender_email, smtp_password)
+                server.send_message(msg)
 
-            msg.attach(MIMEText(html_with_tracking, "html"))
-
-            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
-                server.login(from_email, smtp_password)
-                server.sendmail(from_email, to_email, msg.as_string())
-
-            now_str = current_time.strftime("%d/%m/%Y %H:%M:%S")
-
-            # Update status, timestamp
-            sheet.update_acell(rowcol_to_a1(i, header_map["Status"] + 1), "Mail Sent Successfully")
-            sheet.update_acell(rowcol_to_a1(i, header_map["Timestamp"] + 1), now_str)
-
-            print(f"✅ Email sent to {to_email} ({sheet_name} row {i})")
-
-            time.sleep(1)
+            now_str = now.strftime("%d/%m/%Y %H:%M:%S")
+            worksheet.update_cell(idx, col_map["Status"], "Mail Sent Successfully")
+            worksheet.update_cell(idx, col_map["Timestamp"], now_str)
+            print(f"✅ Sent: {to_email}")
 
         except Exception as e:
-            print(f"❌ Error in row {i} of sheet {sheet_name}: {e}")
-            sheet.update_acell(rowcol_to_a1(i, header_map["Status"] + 1), f"Failed to Send")
+            worksheet.update_cell(idx, col_map["Status"], f"Failed: {str(e)}")
+            print(f"❌ Failed to send to {to_email}: {e}")
