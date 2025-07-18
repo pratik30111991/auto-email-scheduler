@@ -1,141 +1,121 @@
 import os
+import json
 import smtplib
 import pytz
+from datetime import datetime
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from datetime import datetime
-from oauth2client.service_account import ServiceAccountCredentials
-from urllib.parse import quote_plus
+from gspread.utils import rowcol_to_a1
 
-# === Setup ===
-timezone = pytz.timezone("Asia/Kolkata")
-backend_url = os.environ.get("TRACKING_BACKEND_URL")
-sheet_id = os.environ.get("SHEET_ID")
+# Load environment variables
+GOOGLE_JSON = os.getenv("GOOGLE_JSON")
+SHEET_ID = os.getenv("SHEET_ID")
+TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
+if not GOOGLE_JSON or not SHEET_ID or not TRACKING_BACKEND_URL:
+    raise Exception("Missing GOOGLE_JSON, SHEET_ID, or TRACKING_BACKEND_URL")
 
-# === Authorize Google Sheets ===
+# Google Sheets auth
+creds = json.loads(GOOGLE_JSON)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-client = gspread.authorize(creds)
-spreadsheet = client.open_by_key(sheet_id)
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
+client = gspread.authorize(credentials)
+spreadsheet = client.open_by_key(SHEET_ID)
 
-# === Column Mapping ===
-column_map = {
-    "Name": "name",
-    "Email ID": "email",
-    "Subject": "subject",
-    "Message": "message",
-    "Schedule Date & Time": "schedule",
-    "Status": "status",
-    "Timestamp": "timestamp",
-    "Open?": "open",
-    "Open Timestamp": "open_ts",
+# Timezone
+ist = pytz.timezone("Asia/Kolkata")
+
+# Sheet → SMTP mapping
+domain_map = {
+    "Dilshad_Mails": ("dilshad@ticketingplatform.live", "tuesday.mxrouting.net", 465),
+    "Nana_Mails": ("nana_kante@ticketingplatform.live", "md-114.webhostbox.net", 465),
+    "Gaurav_Mails": ("gaurav@ticketingplatform.live", "tuesday.mxrouting.net", 465),
+    "Info_Mails": ("info@ticketingplatform.live", "tuesday.mxrouting.net", 465),
+    "Sales_Mails": ("sales@unlistedradar.in", "md-114.webhostbox.net", 465),
 }
 
-# === SMTP Mapping ===
-smtp_accounts = {
-    "Dilshad_Mails": os.environ.get("SMTP_DILSHAD"),
-    "Nana_Mails": os.environ.get("SMTP_NANA"),
-    "Gaurav_Mails": os.environ.get("SMTP_GAURAV"),
-    "Info_Mails": os.environ.get("SMTP_INFO"),
-    "Sales_Mails": os.environ.get("SMTP_SALES"),
-}
+def send_from_sheet(sheet, row_index, row, headers_map):
+    status = row.get("Status", "").strip()
+    if status:
+        return
 
-# === Helpers ===
-def get_a1(row, col_index):
-    return gspread.utils.rowcol_to_a1(row, col_index)
+    name = row.get("Name", "").strip()
+    email = row.get("Email ID", "").strip()
+    subject = row.get("Subject", "").strip()
+    message = row.get("Message", "").strip()
+    sched = row.get("Schedule Date & Time", "").strip()
 
-def get_column_indexes(header_row):
-    return {col.strip(): i + 1 for i, col in enumerate(header_row)}
+    if not name or not email:
+        sheet.update_cell(row_index, headers_map["Status"], "Missing Name or Email ID")
+        return
 
-def send_email(smtp_user, smtp_pass, from_email, to_email, subject, html):
-    server = smtplib.SMTP("smtp.zoho.in", 587)
-    server.starttls()
-    server.login(from_email, smtp_pass)
+    if not sched:
+        sheet.update_cell(row_index, headers_map["Status"], "Missing Schedule Date & Time")
+        return
 
+    try:
+        sched_dt = datetime.strptime(sched, "%d/%m/%Y %H:%M:%S")
+        sched_dt = ist.localize(sched_dt)
+    except:
+        sheet.update_cell(row_index, headers_map["Status"], "Invalid Schedule Date & Time")
+        return
+
+    if datetime.now(ist) < sched_dt:
+        return  # Not time yet
+
+    sheet_name = sheet.title
+    if sheet_name not in domain_map:
+        print(f"❌ Missing SMTP mapping for {sheet_name}")
+        sheet.update_cell(row_index, headers_map["Status"], "Missing SMTP mapping")
+        return
+
+    from_email, smtp_server, smtp_port = domain_map[sheet_name]
+    smtp_env_key = f'SMTP_{sheet_name.split("_")[0].upper()}'
+    smtp_pass = os.getenv(smtp_env_key)
+    if not smtp_pass:
+        print(f"❌ Missing SMTP password for {sheet_name}")
+        sheet.update_cell(row_index, headers_map["Status"], "Missing SMTP password")
+        return
+
+    # Create email
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
     msg["From"] = from_email
-    msg["To"] = to_email
+    msg["To"] = email
+    msg["Subject"] = subject
+
+    tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}"
+    html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
     msg.attach(MIMEText(html, "html"))
 
-    server.sendmail(from_email, to_email, msg.as_string())
-    server.quit()
+    try:
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+            server.login(from_email, smtp_pass)
+            server.send_message(msg)
 
-def generate_tracking_html(email, sheet_name, row):
-    pixel_url = f"{backend_url}/track?sheet={quote_plus(sheet_name)}&row={row}&email={quote_plus(email)}"
-    return f'<img src="{pixel_url}" alt="" width="1" height="1" style="display:none;" />'
+        now_str = datetime.now(ist).strftime("%d-%m-%Y %H:%M:%S")
+        sheet.update_cell(row_index, headers_map["Status"], "Mail Sent Successfully")
+        sheet.update_cell(row_index, headers_map["Timestamp"], now_str)
+        print(f"✅ Sent: {email} from {from_email} via {smtp_server}")
+    except Exception as e:
+        print(f"❌ Failed to send to {email}: {e}")
+        sheet.update_cell(row_index, headers_map["Status"], f"Failed to Send - {str(e)}")
 
-# === Main Execution ===
-for sheet_name, smtp_cred in smtp_accounts.items():
+# Process each sheet
+for sheet in spreadsheet.worksheets():
+    sheet_name = sheet.title
+    if sheet_name == "Domain Details" or sheet_name not in domain_map:
+        continue
+
     print(f"📄 Processing Sheet: {sheet_name}")
-    if not smtp_cred or ":" not in smtp_cred:
+    headers = sheet.row_values(1)
+    headers_map = {h.strip(): i + 1 for i, h in enumerate(headers)}
+
+    required_cols = ["Name", "Email ID", "Subject", "Message", "Schedule Date & Time", "Status", "Timestamp", "Open?", "Open Timestamp"]
+    if not all(col in headers_map for col in required_cols):
         print(f"ⓘ Skipping invalid sheet {sheet_name}")
         continue
 
-    smtp_email, smtp_pass = smtp_cred.split(":", 1)
-    worksheet = spreadsheet.worksheet(sheet_name)
-    data = worksheet.get_all_values()
-    if not data or len(data) < 2:
-        print(f"⚠️  No data in sheet {sheet_name}")
-        continue
-
-    headers = data[0]
-    indexes = get_column_indexes(headers)
-
-    for row_num, row in enumerate(data[1:], start=2):
-        def get_val(key): return row[indexes.get(key, -1) - 1].strip() if indexes.get(key, 0) <= len(row) else ""
-
-        name = get_val("Name")
-        email = get_val("Email ID")
-        subject = get_val("Subject")
-        message = get_val("Message")
-        schedule_str = get_val("Schedule Date & Time")
-
-        status_col = indexes.get("Status")
-        timestamp_col = indexes.get("Timestamp")
-        open_col = indexes.get("Open?")
-        open_ts_col = indexes.get("Open Timestamp")
-
-        status_cell = get_a1(row_num, status_col) if status_col else None
-        timestamp_cell = get_a1(row_num, timestamp_col) if timestamp_col else None
-
-        if not name or not email:
-            if status_cell:
-                worksheet.update(status_cell, "Missing Name or Email ID")
-            continue
-
-        try:
-            schedule_dt = datetime.strptime(schedule_str, "%d/%m/%Y %H:%M:%S")
-            schedule_dt = timezone.localize(schedule_dt)
-        except Exception:
-            if status_cell:
-                worksheet.update(status_cell, "Invalid or Missing Schedule Date & Time")
-            continue
-
-        now = datetime.now(timezone)
-        if now < schedule_dt:
-            continue  # not time yet
-
-        if now >= schedule_dt:
-            print(f"⏩ Skipped past schedule: {email} (Scheduled: {schedule_dt}, Now: {now})")
-            if status_cell:
-                worksheet.update(status_cell, "Skipped - Scheduled time already passed")
-            continue
-
-        # Send email
-        try:
-            html_msg = message + generate_tracking_html(email, sheet_name, row_num)
-            send_email(smtp_email, smtp_pass, smtp_email, email, subject, html_msg)
-            if status_cell:
-                worksheet.update(status_cell, "Mail Sent Successfully")
-            if timestamp_cell:
-                worksheet.update(timestamp_cell, now.strftime("%d/%m/%Y %H:%M:%S"))
-            if open_col:
-                worksheet.update(get_a1(row_num, open_col), "No")
-            if open_ts_col:
-                worksheet.update(get_a1(row_num, open_ts_col), "")
-        except Exception as e:
-            print(f"❌ Error sending to {email}: {e}")
-            if status_cell:
-                worksheet.update(status_cell, f"Failed to Send - {str(e)}")
+    data = sheet.get_all_records()
+    for idx, row in enumerate(data, start=2):
+        send_from_sheet(sheet, idx, row, headers_map)
