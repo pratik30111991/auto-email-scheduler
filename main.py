@@ -10,24 +10,25 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from gspread.utils import rowcol_to_a1
 
-# Load environment variables
+# --- Setup ---
 GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
-TRACKING_BACKEND_URL = os.getenv("TRACKING_BACKEND_URL")
-if not GOOGLE_JSON or not SHEET_ID or not TRACKING_BACKEND_URL:
-    raise Exception("Missing GOOGLE_JSON, SHEET_ID, or TRACKING_BACKEND_URL")
 
-# Google Sheets auth
+# ✅ HARD-CODED WORKING BACKEND URL
+TRACKING_BACKEND_URL = "https://email-tracking-backend-y6px.onrender.com"
+
+if not GOOGLE_JSON or not SHEET_ID:
+    raise Exception("Missing GOOGLE_JSON or SHEET_ID")
+
 creds = json.loads(GOOGLE_JSON)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
 client = gspread.authorize(credentials)
 spreadsheet = client.open_by_key(SHEET_ID)
 
-# Timezone
 ist = pytz.timezone("Asia/Kolkata")
 
-# Sheet → SMTP mapping
+# SMTP Mapping for each sheet
 domain_map = {
     "Dilshad_Mails": ("dilshad@ticketingplatform.live", "tuesday.mxrouting.net", 465),
     "Nana_Mails": ("nana_kante@ticketingplatform.live", "md-114.webhostbox.net", 465),
@@ -67,7 +68,6 @@ def send_from_sheet(sheet, row_index, row, headers_map):
         sheet.update_cell(row_index, headers_map["Status"], "Skipped – Not Scheduled Yet")
         return
 
-    # Prevent sending too old
     if now - sched_dt > timedelta(minutes=30):
         sheet.update_cell(row_index, headers_map["Status"], "Skipped – Schedule Too Old")
         return
@@ -86,12 +86,12 @@ def send_from_sheet(sheet, row_index, row, headers_map):
         sheet.update_cell(row_index, headers_map["Status"], "Missing SMTP password")
         return
 
-    # Create email
     msg = MIMEMultipart("alternative")
     msg["From"] = from_email
     msg["To"] = email
     msg["Subject"] = subject
 
+    # ✅ Tracking pixel inserted here
     tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}&t={int(time())}"
     html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
     msg.attach(MIMEText(html, "html"))
@@ -109,7 +109,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
         print(f"❌ Failed to send to {email}: {e}")
         sheet.update_cell(row_index, headers_map["Status"], f"Failed to Send - {str(e)}")
 
-# Process each sheet
+# Process all sheets
 for sheet in spreadsheet.worksheets():
     sheet_name = sheet.title
     if sheet_name == "Domain Details" or sheet_name not in domain_map:
