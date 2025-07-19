@@ -15,7 +15,7 @@ GOOGLE_JSON = os.getenv("GOOGLE_JSON")
 SHEET_ID = os.getenv("SHEET_ID")
 
 # ✅ HARD-CODED WORKING BACKEND URL
-TRACKING_BACKEND_URL = "https://email-tracking-backend-y6px.onrender.com"
+TRACKING_BACKEND_URL = "https://auto-email-scheduler.onrender.com"
 
 if not GOOGLE_JSON or not SHEET_ID:
     raise Exception("Missing GOOGLE_JSON or SHEET_ID")
@@ -91,9 +91,16 @@ def send_from_sheet(sheet, row_index, row, headers_map):
     msg["To"] = email
     msg["Subject"] = subject
 
-    # ✅ Tracking pixel inserted here
+    # ✅ Tracking pixel - now properly wrapped in full HTML body
     tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}&t={int(time())}"
-    html = message + f"<img src='{tracking_pixel}' width='1' height='1' />"
+    html = f"""
+    <html>
+      <body>
+        {message}
+        <img src="{tracking_pixel}" width="1" height="1" style="display:none;" />
+      </body>
+    </html>
+    """
     msg.attach(MIMEText(html, "html"))
 
     try:
