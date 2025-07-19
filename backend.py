@@ -63,7 +63,7 @@ def track():
         print("[❌ Error]", str(e))
         return Response(status=500)
 
-    # Return 1x1 tracking pixel
+    # 1x1 transparent GIF pixel
     pixel = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xFF\xFF\xFF!' \
             b'\xF9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01' \
             b'\x00\x00\x02\x02D\x01\x00;'
