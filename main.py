@@ -53,8 +53,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
         return
 
     if not sched:
-        sheet.update_cell(row_index, headers_map["Status"], "Missing Schedule Date & Time")
-        return
+        return  # ⛔ Skip silently if no schedule
 
     try:
         sched_dt = datetime.strptime(sched, "%d/%m/%Y %H:%M:%S")
@@ -65,8 +64,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
 
     now = datetime.now(ist)
     if now < sched_dt:
-        sheet.update_cell(row_index, headers_map["Status"], "Skipped – Not Scheduled Yet")
-        return
+        return  # ⛔ Skip silently if scheduled for future
 
     if now - sched_dt > timedelta(minutes=30):
         sheet.update_cell(row_index, headers_map["Status"], "Skipped – Schedule Too Old")
@@ -91,7 +89,7 @@ def send_from_sheet(sheet, row_index, row, headers_map):
     msg["To"] = email
     msg["Subject"] = subject
 
-    # ✅ Tracking pixel - now properly wrapped in full HTML body
+    # ✅ Tracking pixel
     tracking_pixel = f"{TRACKING_BACKEND_URL}/track?sheet={sheet_name}&row={row_index}&email={email}&t={int(time())}"
     html = f"""
     <html>
