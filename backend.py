@@ -5,9 +5,13 @@ import json
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pytz
+import logging
 
 app = Flask(__name__)
 INDIA_TZ = pytz.timezone('Asia/Kolkata')
+
+# Enable logging to file
+logging.basicConfig(filename='renderlog.txt', level=logging.INFO, format='%(asctime)s - %(message)s')
 
 # Google Sheets auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -23,13 +27,17 @@ def track():
         timestamp_param = request.args.get("t")
 
         if not sheet_name or not row or not email_param or not timestamp_param:
-            print("[⚠️ Missing Parameter]", sheet_name, row, email_param)
+            msg = f"[⚠️ Missing Parameter] {sheet_name}, {row}, {email_param}"
+            print(msg)
+            logging.info(msg)
             return Response(status=400)
 
         user_agent = request.headers.get("User-Agent", "").lower()
 
         if "googleimageproxy" in user_agent:
-            print("[🤖 Skipping Google proxy UA]", user_agent)
+            msg = f"[🤖 Skipping Google proxy UA] {user_agent}"
+            print(msg)
+            logging.info(msg)
             return Response(status=204)
 
         sheet = client.open_by_key(os.environ['SHEET_ID']).worksheet(sheet_name)
@@ -42,7 +50,9 @@ def track():
 
         email_in_sheet = sheet.cell(row, email_col).value.strip().lower()
         if email_in_sheet != email_param.strip().lower():
-            print(f"[⛔ Mismatch Email] Sheet: {sheet_name}, Row: {row}, Param: {email_param}, Sheet: {email_in_sheet}")
+            msg = f"[⛔ Mismatch Email] Sheet: {sheet_name}, Row: {row}, Param: {email_param}, Sheet: {email_in_sheet}"
+            print(msg)
+            logging.info(msg)
             return Response(status=204)
 
         sent_time = datetime.fromtimestamp(int(timestamp_param), INDIA_TZ)
@@ -50,7 +60,9 @@ def track():
         diff = (now - sent_time).total_seconds()
 
         if diff < 30:
-            print(f"[⏳ Too Early] Email: {email_param}, Delay: {int(diff)} sec — Skipped")
+            msg = f"[⏳ Too Early] Sheet: {sheet_name}, Row: {row}, Email: {email_param}, Delay: {int(diff)} sec"
+            print(msg)
+            logging.info(msg)
             return Response(status=204)
 
         open_status = sheet.cell(row, open_col).value
@@ -58,16 +70,30 @@ def track():
             now_str = now.strftime('%d-%m-%Y %H:%M:%S')
             sheet.update_cell(row, open_col, "Yes")
             sheet.update_cell(row, timestamp_col, now_str)
-            print(f"[✅ Marked Open] Sheet: {sheet_name}, Row: {row}, Email: {email_param}, Time: {now_str}")
+            msg = f"[✅ Marked Open] Sheet: {sheet_name}, Row: {row}, Email: {email_param}, Time: {now_str}"
+            print(msg)
+            logging.info(msg)
 
     except Exception as e:
-        print("[❌ Error]", str(e))
+        msg = f"[❌ Error] {str(e)}"
+        print(msg)
+        logging.info(msg)
         return Response(status=500)
 
+    # Tracking pixel (invisible 1x1 GIF)
     pixel = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xFF\xFF\xFF!' \
             b'\xF9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01' \
             b'\x00\x00\x02\x02D\x01\x00;'
     return Response(pixel, mimetype='image/gif')
+
+# ✅ New route to serve the log file
+@app.route("/logs/renderlog.txt")
+def logs():
+    try:
+        with open("renderlog.txt", "r") as f:
+            return f.read(), 200, {'Content-Type': 'text/plain'}
+    except:
+        return "Log file not found", 404
 
 @app.route("/")
 def home():
