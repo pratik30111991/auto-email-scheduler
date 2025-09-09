@@ -12,11 +12,11 @@ jobs:
       actions: write
 
     steps:
-      - name: Delete workflow runs before 30 August 2025
+      - name: Delete workflow runs before 08 September 2025
         uses: actions/github-script@v7
         with:
           script: |
-            const cutoffDate = new Date("2025-08-30T00:00:00Z");
+            const cutoffDate = new Date("2025-09-08T00:00:00Z");
             const perPage = 100;
 
             let page = 1;
