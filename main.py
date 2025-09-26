@@ -35,7 +35,7 @@ domain_map = {
     "Gaurav_Mails": ("gaurav@ticketingplatform.live", "tuesday.mxrouting.net", 465),
     "Info_Mails": ("info@ticketingplatform.live", "tuesday.mxrouting.net", 465),
     "Sales_Mails": ("sales@unlistedradar.in", "md-114.webhostbox.net", 465),
-    "Yotix_Mails": ("sales@yatix.co.in", "md-114.webhostbox.net", 465),
+    "Yatix_Mails": ("sales@yatix.co.in", "md-114.webhostbox.net", 465),
 }
 
 def send_from_sheet(sheet, row_index, row, headers_map):
