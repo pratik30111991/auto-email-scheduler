@@ -40,3 +40,4 @@ jobs:
           SMTP_GAURAV: ${{ secrets.SMTP_GAURAV }}
           SMTP_INFO: ${{ secrets.SMTP_INFO }}
           SMTP_SALES: ${{ secrets.SMTP_SALES }}
+          Yotix_Mails: ${{ secrets.Yotix_Mails }}
